@@ -13,5 +13,8 @@ namespace ControleDeGasto.API.Application.DTOs
         [Required(ErrorMessage = "Senha obrigatória.")]
         [MinLength(8, ErrorMessage = "Senha deve possuir no mínimo 8 caracteres")]
         public string Password { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Lembrar-me obrigatório")]
+        public bool RememberMe { get; set; }
     }
 }

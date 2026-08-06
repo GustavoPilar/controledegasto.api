@@ -2,8 +2,12 @@ using ControleDeGasto.API.Api.Filters;
 using ControleDeGasto.API.Application.Configuration;
 using ControleDeGasto.API.Domain.Entities;
 using ControleDeGasto.API.Infra.Persistence;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Mvc.Authorization;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -15,9 +19,10 @@ builder.Services.AddOpenApi();
 
 builder.Services.AddDbContext<AppDbContext>(options => { options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")); });
 
+// Configuração do Identity
 builder.Services.AddIdentityCore<User>(options =>
 {
-    options.User.AllowedUserNameCharacters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890_.- ";
+    options.User.AllowedUserNameCharacters = builder.Configuration["Identity:AllowedUserNameCharacters"]!;
     options.User.RequireUniqueEmail = false;
 
     options.Password.RequireNonAlphanumeric = true;
@@ -29,14 +34,16 @@ builder.Services.AddIdentityCore<User>(options =>
     options.Lockout.MaxFailedAccessAttempts = 5;
     options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
 })
-    .AddRoles<IdentityRole<Guid>>()
-    .AddSignInManager()
+    .AddRoles<IdentityRole<Guid>>() // Adiciona as Roles
+    .AddSignInManager() // Adiciona o serviço gerenciador de SigIn
     .AddEntityFrameworkStores<AppDbContext>()
-    .AddDefaultTokenProviders();
+    .AddDefaultTokenProviders(); // Adiciona o provedor padrão de token
 
+// Adicionando autenticação via Cookie
 builder.Services.AddAuthentication(IdentityConstants.ApplicationScheme)
     .AddIdentityCookies(); // Registra o cookie handler para os schemes do Identity
 
+// Configuração do Cookie
 builder.Services.ConfigureApplicationCookie(options =>
 {
     // Impede acesso via JS (evita XSS)
@@ -45,17 +52,21 @@ builder.Services.ConfigureApplicationCookie(options =>
     // Cookie só trafega em HTTPS
     options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
 
+    // Apenas requisições do mesmo site (porta não interfere, desde seja a mesma origem)
     options.Cookie.SameSite = SameSiteMode.Strict;
 
+    // Tempo de expiração da sessão
     options.ExpireTimeSpan = TimeSpan.FromMinutes(60);
     options.SlidingExpiration = true;
 
+    // O que acontece com status 401
     options.Events.OnRedirectToLogin = context =>
     {
         context.Response.StatusCode = StatusCodes.Status401Unauthorized;
         return Task.CompletedTask;
     };
 
+    // O que acontece com status 403
     options.Events.OnRedirectToAccessDenied = context =>
     {
         context.Response.StatusCode = StatusCodes.Status403Forbidden;
@@ -63,6 +74,7 @@ builder.Services.ConfigureApplicationCookie(options =>
     };
 });
 
+// Politica de cors para SPA com cookies
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AngularSpaPolicy", policy =>
@@ -74,13 +86,82 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Antiforgery (Proteção CSRF)
+// Adicionando Antiforgery (Proteção CSRF)
 builder.Services.AddAntiforgery(options =>
 {
-    options.HeaderName = "X-XSRF-TOKEN";
+    options.HeaderName = builder.Configuration["XSRF:XSRF_HEADER_NAME"];
     options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
 });
 
+// Adicionando politica de Fallback para controladores
+// nascerem com [Authorize] automaticamente
+builder.Services.AddAuthorization(options =>
+{
+    options.FallbackPolicy = new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .Build();
+});
+
+// Adiciona a Rating Limit (proteção contra muitas requisições)
+builder.Services.AddRateLimiter(options =>
+{
+    // Response padrão quando o limite é execido. Default => 503
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    // Política para endpoint de login: evita spam de login
+    options.AddPolicy("LoginPolicy", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknow",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 5, // Quantidade máxima de requisições permitida por janela de tempo
+                Window = TimeSpan.FromMinutes(1), // Duração da janela de tempo
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst, //  FIFO -> Primeiro a entrar é o primeiro a sair
+                QueueLimit = 0 // Quantidade máxima de requisições que podem aguardar na fila (0 = não enfileira)
+            }));
+
+    // Politica para endpoint de registro: evita spam de criação de contas
+    options.AddPolicy("RegisterPolicy", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknow",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 3,
+                Window = TimeSpan.FromMinutes(5),
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit = 0
+            }));
+
+    // Política genérica para o restante da API (proteção geral)
+    options.AddPolicy("GlobalPolicy", httpContext =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknow",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 100,
+                Window = TimeSpan.FromMinutes(1),
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+                QueueLimit = 1
+            }));
+
+    // Callback executado quando a requisição é rejeitada - customiza o corpo da resposta
+    options.OnRejected = async (context, cancellationToken) =>
+    {
+        context.HttpContext.Response.ContentType = "application/json";
+
+        if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out TimeSpan retryAfter))
+        {
+            context.HttpContext.Response.Headers.RetryAfter = retryAfter.TotalSeconds.ToString();
+        }
+
+        await context.HttpContext.Response.WriteAsJsonAsync(
+            new { Message = "Muitas requisições. Tente novamente em instantes." },
+            cancellationToken);
+    };
+
+});
+
+// Adicionando o filtro para validar antiforgery (Proteção CSRF)
 builder.Services.AddScoped<ValidateAntiforgeryTokenFilter>();
 
 var app = builder.Build();
@@ -88,16 +169,18 @@ var app = builder.Build();
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
-    app.MapOpenApi();
+    app.MapOpenApi().AllowAnonymous();
     app.UseCors("AngularSpaPolicy");
 }
 
 app.UseHttpsRedirection();
 
+app.UseRateLimiter();
+
 app.UseAuthentication();
 app.UseAuthorization();
 
-app.MapControllers();
+app.MapControllers().RequireRateLimiting("GlobalPolicy");
 
 using (IServiceScope scope = app.Services.CreateScope())
 {

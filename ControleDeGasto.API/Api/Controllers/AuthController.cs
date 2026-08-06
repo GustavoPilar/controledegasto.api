@@ -3,9 +3,11 @@ using ControleDeGasto.API.Application.Configuration;
 using ControleDeGasto.API.Application.DTOs;
 using ControleDeGasto.API.Domain.Entities;
 using Microsoft.AspNetCore.Antiforgery;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.AspNetCore.Identity.Data;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
+using System.Security.Claims;
 
 namespace ControleDeGasto.API.Api.Controllers
 {
@@ -15,29 +17,86 @@ namespace ControleDeGasto.API.Api.Controllers
         UserManager<User> userManager,
         SignInManager<User> signInManager,
         IAntiforgery antiforgery,
-        ILogger<AuthController> logger) : ControllerBase
+        ILogger<AuthController> logger,
+        IConfiguration configuration) : ControllerBase
     {
+        #region Fields
+
+        private readonly string XSRF_COOKIE_NAME = configuration["XSRF:XSRF_COOKIE_NAME"]!;
         private readonly UserManager<User> UserManager = userManager;
         private readonly SignInManager<User> SignInManager = signInManager;
         private readonly IAntiforgery antiforgery = antiforgery;
         private readonly ILogger<AuthController> Logger = logger;
 
-        [HttpGet("csrf-token")]
-        public IActionResult GetCsrfToken()
+        #endregion
+
+        #region Members NonAction
+
+        [NonAction]
+        private void IssueAntiforgeryCookie()
         {
             AntiforgeryTokenSet tokenSet = this.antiforgery.GetAndStoreTokens(this.HttpContext);
 
-            this.Response.Cookies.Append("XSRF-TOKEN", tokenSet.RequestToken!, new CookieOptions
+            this.Response.Cookies.Append(XSRF_COOKIE_NAME, tokenSet.RequestToken!, new CookieOptions
             {
                 HttpOnly = false,
                 Secure = true,
-                SameSite = SameSiteMode.Strict
+                SameSite = SameSiteMode.Strict,
+                Path = "/"
             });
-
-            return this.Ok();
         }
 
+        #endregion
+
+        #region Members Actions :: HttpGet, HttpPost
+
+        #region HttpGet
+
+        [HttpGet("csrf-token")]
+        [AllowAnonymous]
+        public IActionResult GetCsrfToken()
+        {
+            try
+            {
+                this.IssueAntiforgeryCookie();
+
+                return this.Ok();
+            }
+            catch (Exception ex)
+            {
+                this.Logger.LogError(ex, ex.Message);
+                return this.StatusCode(StatusCodes.Status500InternalServerError, new { Message = "Erro no servidor." });
+            }
+        }
+
+        [HttpGet("me")]
+        public async Task<ActionResult<UserResponse>> Me()
+        {
+            try
+            {
+
+                User? user = await this.UserManager.GetUserAsync(this.User);
+
+                if (user is null)
+                    return this.NotFound(new { Message = "Usuário não encontrado." });
+
+                return this.Ok(user);
+            }
+            catch (Exception ex)
+            {
+                this.Logger.LogError(ex, ex.Message);
+                return this.StatusCode(StatusCodes.Status500InternalServerError, new { Message = "Erro no servidor." });
+            }
+        }
+
+        #endregion
+
+        #region HttpPost
+
         [HttpPost("register")]
+        [AllowAnonymous]
+        [ValidateAntiforgeryToken]
+        [EnableRateLimiting("RegisterPolicy")]
         public async Task<ActionResult> Register(UserRequest request)
         {
             try
@@ -79,7 +138,9 @@ namespace ControleDeGasto.API.Api.Controllers
 
         [HttpPost("login")]
         [ValidateAntiforgeryToken]
-        public async Task<ActionResult> Login(Application.DTOs.LoginRequest request)
+        [AllowAnonymous]
+        [EnableRateLimiting("LoginPolicy")]
+        public async Task<ActionResult<UserResponse>> Login(LoginRequest request)
         {
             try
             {
@@ -88,7 +149,7 @@ namespace ControleDeGasto.API.Api.Controllers
                 if (user is null)
                     return this.Unauthorized(new { Message = "Credenciais inválidas." });
 
-                Microsoft.AspNetCore.Identity.SignInResult result = await this.SignInManager.PasswordSignInAsync(user, request.Password, isPersistent: true, lockoutOnFailure: true);
+                Microsoft.AspNetCore.Identity.SignInResult result = await this.SignInManager.PasswordSignInAsync(user, request.Password, isPersistent: request.RememberMe, lockoutOnFailure: true);
 
                 if (result.IsLockedOut)
                 {
@@ -101,15 +162,39 @@ namespace ControleDeGasto.API.Api.Controllers
                     return this.Unauthorized(new { Message = "Credenciais inválidas." });
                 }
 
+                this.IssueAntiforgeryCookie();
+
                 this.Logger.LogInformation("Usuário {UserId} autenticado com sucesso.", user.Id);
-                return this.Ok(new { Message = "Login realizado com sucesso" });
+                return this.Ok(new UserResponse(user));
             }
             catch (Exception ex)
             {
                 this.Logger.LogError(ex, ex.Message);
-                return this.StatusCode(StatusCodes.Status500InternalServerError);
+                return this.StatusCode(StatusCodes.Status500InternalServerError, new { Message = "Erro no servidor." });
             }
         }
 
+        [HttpPost("logout")]
+        [ValidateAntiforgeryToken]
+        public async Task<ActionResult> Logout()
+        {
+            try
+            {
+                await this.SignInManager.SignOutAsync();
+
+                this.Response.Cookies.Delete(XSRF_COOKIE_NAME);
+
+                return this.NoContent();
+            }
+            catch (Exception ex)
+            {
+                this.Logger.LogError(ex, ex.Message);
+                return this.StatusCode(StatusCodes.Status500InternalServerError, new { Message = "Erro no servidor" });
+            }
+        }
+
+        #endregion
+
+        #endregion
     }
 }

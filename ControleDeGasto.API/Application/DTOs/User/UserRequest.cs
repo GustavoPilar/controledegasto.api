@@ -15,7 +15,7 @@ namespace ControleDeGasto.API.Application.DTOs
         [Required(ErrorMessage = "Nome de usuário é obrigatório.")]
         [MinLength(3, ErrorMessage = "Nome de usuário deve possuir no mínimo 3 caracteres.")]
         [MaxLength(50, ErrorMessage = "Nome de usuário deve possuir no máximo 50 caracteres.")]
-        [RegularExpression(@"^[a-zA-Z-._ ]+$", ErrorMessage = "Apenas letras (a-z e/ou A-Z), números (0-9), ponto (.), hífen (-), underline (_) e espaço.")]
+        [RegularExpression(@"^[a-zA-Z0-9._\- ]+$", ErrorMessage = "Apenas letras (a-z e/ou A-Z), números (0-9), ponto (.), hífen (-), underline (_) e espaço.")]
         public string UserName { get; set; } = string.Empty;
 
         [Required(ErrorMessage = "E-mail é obrigatório.")]

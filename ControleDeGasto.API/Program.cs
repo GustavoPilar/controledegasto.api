@@ -171,9 +171,12 @@ builder.Services.Configure<AppSettings>(builder.Configuration.GetSection("AppSet
 builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("EmailSettings"));
 builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
 
+// Vale para todos os tokens do DataProtection (confirmação de e-mail, reset de senha).
+// 15 minutos dão folga para o e-mail ser entregue e aberto, sem deixar um link
+// válido por muito tempo caso a caixa de entrada seja comprometida.
 builder.Services.Configure<DataProtectionTokenProviderOptions>(options =>
 {
-    options.TokenLifespan = TimeSpan.FromSeconds(30);
+    options.TokenLifespan = TimeSpan.FromMinutes(15);
 });
 
 var app = builder.Build();

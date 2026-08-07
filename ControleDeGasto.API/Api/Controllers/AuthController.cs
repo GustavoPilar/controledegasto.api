@@ -95,7 +95,8 @@ namespace ControleDeGasto.API.Api.Controllers
                     return this.BadRequest(new { Message = "Link de confirmação inválido." });
                 }
 
-                string decodedToken = Uri.UnescapeDataString(token);
+                // O token chega já decodificado: o binding de query string do ASP.NET
+                // desfaz o escape aplicado na montagem do link.
                 IdentityResult result = await this.UserManager.ConfirmEmailAsync(user, token);
 
                 if (!result.Succeeded)

@@ -215,7 +215,7 @@ namespace ControleDeGasto.API.Api.Controllers
         {
             try
             {
-                User? user = await this.UserManager.FindByNameAsync(request.UserName);
+                User? user = await this.UserManager.FindByEmailAsync(request.Email);
 
                 if (user is null)
                     return this.Unauthorized(new { Message = "Credenciais inválidas." });

@@ -16,6 +16,13 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
+    <!--
+      Referência direta apenas para elevar a versão transitiva: Microsoft.AspNetCore.OpenApi
+      fixa a 2.0.0, vulnerável a stack overflow ao ler documentos OpenAPI com referência
+      circular de schema (CVE-2026-49451). 2.7.5 é a primeira correção da linha 2.x.
+      Pode ser removida quando Microsoft.AspNetCore.OpenApi passar a exigir >= 2.7.5.
+    -->
+    <PackageReference Include="Microsoft.OpenApi" Version="2.7.5" />
     <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.23.0" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
   </ItemGroup>

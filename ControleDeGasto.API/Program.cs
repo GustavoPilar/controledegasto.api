@@ -1,4 +1,4 @@
-using ControleDeGasto.API.Api.Filters;
+Ôªøusing ControleDeGasto.API.Api.Filters;
 using ControleDeGasto.API.Application.Configuration;
 using ControleDeGasto.API.Application.Interfaces;
 using ControleDeGasto.API.Application.Services;
@@ -19,7 +19,7 @@ builder.Services.AddOpenApi();
 
 builder.Services.AddDbContext<AppDbContext>(options => { options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")); });
 
-// ConfiguraÁ„o do Identity
+// Configura√ß√£o do Identity
 builder.Services.AddIdentityCore<User>(options =>
 {
     options.User.AllowedUserNameCharacters = builder.Configuration["Identity:AllowedUserNameCharacters"]!;
@@ -38,27 +38,27 @@ builder.Services.AddIdentityCore<User>(options =>
     options.SignIn.RequireConfirmedAccount = true;
 })
     .AddRoles<IdentityRole<Guid>>() // Adiciona as Roles
-    .AddSignInManager() // Adiciona o serviÁo gerenciador de SigIn
+    .AddSignInManager() // Adiciona o servi√ßo gerenciador de SigIn
     .AddEntityFrameworkStores<AppDbContext>()
-    .AddDefaultTokenProviders(); // Adiciona o provedor padr„o de token
+    .AddDefaultTokenProviders(); // Adiciona o provedor padr√£o de token
 
-// Adicionando autenticaÁ„o via Cookie
+// Adicionando autentica√ß√£o via Cookie
 builder.Services.AddAuthentication(IdentityConstants.ApplicationScheme)
     .AddIdentityCookies(); // Registra o cookie handler para os schemes do Identity
 
-// ConfiguraÁ„o do Cookie
+// Configura√ß√£o do Cookie
 builder.Services.ConfigureApplicationCookie(options =>
 {
     // Impede acesso via JS (evita XSS)
     options.Cookie.HttpOnly = true;
 
-    // Cookie sÛ trafega em HTTPS
+    // Cookie s√≥ trafega em HTTPS
     options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
 
-    // Apenas requisiÁıes do mesmo site (porta n„o interfere, desde seja a mesma origem)
+    // Apenas requisi√ß√µes do mesmo site (porta n√£o interfere, desde seja a mesma origem)
     options.Cookie.SameSite = SameSiteMode.Strict;
 
-    // Tempo de expiraÁ„o da sess„o
+    // Tempo de expira√ß√£o da sess√£o
     options.ExpireTimeSpan = TimeSpan.FromMinutes(60);
     options.SlidingExpiration = true;
 
@@ -85,11 +85,11 @@ builder.Services.AddCors(options =>
         policy.WithOrigins("https://localhost:4201")
             .AllowAnyHeader()
             .AllowAnyMethod()
-            .AllowCredentials(); // Necess·rio para cookie ser enviado/recebido
+            .AllowCredentials(); // Necess√°rio para cookie ser enviado/recebido
     });
 });
 
-// Adicionando Antiforgery (ProteÁ„o CSRF)
+// Adicionando Antiforgery (Prote√ß√£o CSRF)
 builder.Services.AddAntiforgery(options =>
 {
     options.HeaderName = builder.Configuration["XSRF:XSRF_HEADER_NAME"];
@@ -105,25 +105,25 @@ builder.Services.AddAuthorization(options =>
         .Build();
 });
 
-// Adiciona a Rating Limit (proteÁ„o contra muitas requisiÁıes)
+// Adiciona a Rating Limit (prote√ß√£o contra muitas requisi√ß√µes)
 builder.Services.AddRateLimiter(options =>
 {
-    // Response padr„o quando o limite È execido. Default => 503
+    // Response padr√£o quando o limite √© execido. Default => 503
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 
-    // PolÌtica para endpoint de login: evita spam de login
+    // Pol√≠tica para endpoint de login: evita spam de login
     options.AddPolicy("LoginPolicy", httpContext =>
         RateLimitPartition.GetFixedWindowLimiter(
             partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknow",
             factory: _ => new FixedWindowRateLimiterOptions
             {
-                PermitLimit = 5, // Quantidade m·xima de requisiÁıes permitida por janela de tempo
-                Window = TimeSpan.FromMinutes(1), // DuraÁ„o da janela de tempo
-                QueueProcessingOrder = QueueProcessingOrder.OldestFirst, //  FIFO -> Primeiro a entrar È o primeiro a sair
-                QueueLimit = 0 // Quantidade m·xima de requisiÁıes que podem aguardar na fila (0 = n„o enfileira)
+                PermitLimit = 5, // Quantidade m√°xima de requisi√ß√µes permitida por janela de tempo
+                Window = TimeSpan.FromMinutes(1), // Dura√ß√£o da janela de tempo
+                QueueProcessingOrder = QueueProcessingOrder.OldestFirst, //  FIFO -> Primeiro a entrar √© o primeiro a sair
+                QueueLimit = 0 // Quantidade m√°xima de requisi√ß√µes que podem aguardar na fila (0 = n√£o enfileira)
             }));
 
-    // Politica para endpoint de registro: evita spam de criaÁ„o de contas
+    // Politica para endpoint de registro: evita spam de cria√ß√£o de contas
     options.AddPolicy("RegisterPolicy", httpContext =>
         RateLimitPartition.GetFixedWindowLimiter(
             partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknow",
@@ -135,7 +135,7 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0
             }));
 
-    // PolÌtica genÈrica para o restante da API (proteÁ„o geral)
+    // Pol√≠tica gen√©rica para o restante da API (prote√ß√£o geral)
     options.AddPolicy("GlobalPolicy", httpContext =>
         RateLimitPartition.GetFixedWindowLimiter(
             partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknow",
@@ -147,7 +147,7 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 1
             }));
 
-    // Callback executado quando a requisiÁ„o È rejeitada - customiza o corpo da resposta
+    // Callback executado quando a requisi√ß√£o √© rejeitada - customiza o corpo da resposta
     options.OnRejected = async (context, cancellationToken) =>
     {
         context.HttpContext.Response.ContentType = "application/json";
@@ -158,22 +158,22 @@ builder.Services.AddRateLimiter(options =>
         }
 
         await context.HttpContext.Response.WriteAsJsonAsync(
-            new { Message = "Muitas requisiÁıes. Tente novamente em instantes." },
+            new { Message = "Muitas requisi√ß√µes. Tente novamente em instantes." },
             cancellationToken);
     };
 
 });
 
-// Adicionando o filtro para validar antiforgery (ProteÁ„o CSRF)
+// Adicionando o filtro para validar antiforgery (Prote√ß√£o CSRF)
 builder.Services.AddScoped<ValidateAntiforgeryTokenFilter>();
 
 builder.Services.Configure<AppSettings>(builder.Configuration.GetSection("AppSettings"));
 builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("EmailSettings"));
 builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
 
-// Vale para todos os tokens do DataProtection (confirmaÁ„o de e-mail, reset de senha).
-// 15 minutos d„o folga para o e-mail ser entregue e aberto, sem deixar um link
-// v·lido por muito tempo caso a caixa de entrada seja comprometida.
+// Vale para todos os tokens do DataProtection (confirma√ß√£o de e-mail, reset de senha).
+// 15 minutos d√£o folga para o e-mail ser entregue e aberto, sem deixar um link
+// v√°lido por muito tempo caso a caixa de entrada seja comprometida.
 builder.Services.Configure<DataProtectionTokenProviderOptions>(options =>
 {
     options.TokenLifespan = TimeSpan.FromMinutes(15);

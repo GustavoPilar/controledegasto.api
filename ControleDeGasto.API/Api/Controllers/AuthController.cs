@@ -1,12 +1,14 @@
 ﻿using ControleDeGasto.API.Api.Filters;
 using ControleDeGasto.API.Application.Configuration;
 using ControleDeGasto.API.Application.DTOs;
+using ControleDeGasto.API.Application.Interfaces;
 using ControleDeGasto.API.Domain.Entities;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.Options;
 using System.Security.Claims;
 
 namespace ControleDeGasto.API.Api.Controllers
@@ -18,15 +20,21 @@ namespace ControleDeGasto.API.Api.Controllers
         SignInManager<User> signInManager,
         IAntiforgery antiforgery,
         ILogger<AuthController> logger,
-        IConfiguration configuration) : ControllerBase
+        IConfiguration configuration,
+        IEmailSender emailSender,
+        IOptions<AppSettings> appSettings) : ControllerBase
     {
         #region Fields
 
         private readonly string XSRF_COOKIE_NAME = configuration["XSRF:XSRF_COOKIE_NAME"]!;
         private readonly UserManager<User> UserManager = userManager;
         private readonly SignInManager<User> SignInManager = signInManager;
-        private readonly IAntiforgery antiforgery = antiforgery;
+        private readonly IAntiforgery Antiforgery = antiforgery;
         private readonly ILogger<AuthController> Logger = logger;
+        private readonly IEmailSender EmailSender = emailSender;
+        private readonly AppSettings AppSettings = appSettings.Value;
+
+        private string emailConfirmationBaseUrl => $"{this.AppSettings.FrontendBaseUrl}/confirmEmail";
 
         #endregion
 
@@ -35,7 +43,7 @@ namespace ControleDeGasto.API.Api.Controllers
         [NonAction]
         private void IssueAntiforgeryCookie()
         {
-            AntiforgeryTokenSet tokenSet = this.antiforgery.GetAndStoreTokens(this.HttpContext);
+            AntiforgeryTokenSet tokenSet = this.Antiforgery.GetAndStoreTokens(this.HttpContext);
 
             this.Response.Cookies.Append(XSRF_COOKIE_NAME, tokenSet.RequestToken!, new CookieOptions
             {
@@ -66,6 +74,43 @@ namespace ControleDeGasto.API.Api.Controllers
             {
                 this.Logger.LogError(ex, ex.Message);
                 return this.StatusCode(StatusCodes.Status500InternalServerError, new { Message = "Erro no servidor." });
+            }
+        }
+
+        [HttpGet("confirm-email")]
+        [AllowAnonymous]
+        public async Task<ActionResult> ConfirmEmail(string userId, string token)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(userId) || string.IsNullOrEmpty(token))
+                {
+                    return this.BadRequest(new { Message = "Parâmetros inválidos." });
+                }
+
+                User? user = await this.UserManager.FindByIdAsync(userId);
+
+                if (user is null)
+                {
+                    return this.BadRequest(new { Message = "Link de confirmação inválido." });
+                }
+
+                string decodedToken = Uri.UnescapeDataString(token);
+                IdentityResult result = await this.UserManager.ConfirmEmailAsync(user, token);
+
+                if (!result.Succeeded)
+                {
+                    this.Logger.LogWarning("Falha ao confirmar e-mail do usuário {UserId}", user.Id);
+                    return this.BadRequest(new { Message = "Link de confirmação inválido ou expirado." });
+                }
+
+                this.Logger.LogInformation("E-mail confirmado para usuário {UserId}", user.Id);
+                return this.Ok(new { Message = "E-mail confirmado com sucesso!" });
+            }
+            catch (Exception ex)
+            {
+                this.Logger.LogError(ex, ex.Message);
+                return this.StatusCode(StatusCodes.Status500InternalServerError, new { Message = "Erro no servidor" });
             }
         }
 
@@ -104,10 +149,18 @@ namespace ControleDeGasto.API.Api.Controllers
                 User? user = await this.UserManager.FindByNameAsync(request.UserName);
 
                 if (user is not null)
-                    return BadRequest(new { Message = "Nome de usuário já cadastrado." });
+                    return BadRequest(new { Message = "Cadastro inválido." });
+
+                user = await this.UserManager.FindByEmailAsync(request.Email);
+
+                if (user is not null)
+                    return BadRequest(new { Message = "Cadastro inválido." });
 
                 user = new User()
                 {
+                    FullName = request.FullName,
+                    Email = request.Email,
+                    EmailConfirmed = false,
                     UserName = request.UserName,
                     Active = true,
                     CreatedAt = DateTime.UtcNow,
@@ -127,7 +180,24 @@ namespace ControleDeGasto.API.Api.Controllers
                     return BadRequest(new { Message = roleResult.Errors.First().Description });
                 }
 
-                return this.Ok(new { Message = $"Usuário {user.UserName} foi criado." });
+                string token = await this.UserManager.GenerateEmailConfirmationTokenAsync(user);
+
+                string encodedToken = Uri.EscapeDataString(token);
+
+                string confirmationLink =
+                    $"{this.emailConfirmationBaseUrl}?userId={user.Id}&token={encodedToken}";
+
+                string emailBody = $"""
+                    <h1>Bem-vindo ao Controle de Gasto!</h1>
+                    <p>Confirme seu e-mail clicando no link abaixo:</p>
+                    <a href="{confirmationLink}">Confirmar E-mail</a>
+                    <p>Se você não criou essa conta, ignore este e-mail.<p>
+                    """;
+
+                await this.EmailSender.SendEmailAsync(user.Email, "Confirmação de conta - Controle de Gasto", emailBody);
+
+                this.Logger.LogInformation("Usuário {user.Id} registrado, e-mail de confirmação eviado.", user.Id);
+                return this.Created(string.Empty, new { Succeeded = true });
             }
             catch (Exception ex)
             {

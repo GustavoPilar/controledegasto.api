@@ -1,11 +1,11 @@
 using ControleDeGasto.API.Api.Filters;
 using ControleDeGasto.API.Application.Configuration;
+using ControleDeGasto.API.Application.Interfaces;
+using ControleDeGasto.API.Application.Services;
 using ControleDeGasto.API.Domain.Entities;
 using ControleDeGasto.API.Infra.Persistence;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.AspNetCore.Mvc.Authorization;
-using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using System.Threading.RateLimiting;
 
@@ -23,7 +23,7 @@ builder.Services.AddDbContext<AppDbContext>(options => { options.UseNpgsql(build
 builder.Services.AddIdentityCore<User>(options =>
 {
     options.User.AllowedUserNameCharacters = builder.Configuration["Identity:AllowedUserNameCharacters"]!;
-    options.User.RequireUniqueEmail = false;
+    options.User.RequireUniqueEmail = true;
 
     options.Password.RequireNonAlphanumeric = true;
     options.Password.RequireDigit = true;
@@ -33,6 +33,9 @@ builder.Services.AddIdentityCore<User>(options =>
 
     options.Lockout.MaxFailedAccessAttempts = 5;
     options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
+
+    options.SignIn.RequireConfirmedEmail = true;
+    options.SignIn.RequireConfirmedAccount = true;
 })
     .AddRoles<IdentityRole<Guid>>() // Adiciona as Roles
     .AddSignInManager() // Adiciona o serviço gerenciador de SigIn
@@ -163,6 +166,15 @@ builder.Services.AddRateLimiter(options =>
 
 // Adicionando o filtro para validar antiforgery (Proteção CSRF)
 builder.Services.AddScoped<ValidateAntiforgeryTokenFilter>();
+
+builder.Services.Configure<AppSettings>(builder.Configuration.GetSection("AppSettings"));
+builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("EmailSettings"));
+builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
+
+builder.Services.Configure<DataProtectionTokenProviderOptions>(options =>
+{
+    options.TokenLifespan = TimeSpan.FromSeconds(30);
+});
 
 var app = builder.Build();
 

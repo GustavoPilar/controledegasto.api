@@ -8,6 +8,10 @@ namespace ControleDeGasto.API.Infra.Persistence
     {
         public void Configure(EntityTypeBuilder<User> builder)
         {
+            builder.Property(x => x.FullName)
+                .IsRequired()
+                .HasColumnType("varchar(150)");
+
             builder.Property(x => x.CreatedAt)
                 .IsRequired();
 

@@ -230,6 +230,11 @@ namespace ControleDeGasto.API.Api.Controllers
 
                 if (!result.Succeeded)
                 {
+                    if (result.IsNotAllowed)
+                    {
+                        return this.Unauthorized(new { Message = "Confirme seu e-mail" });
+                    }
+
                     return this.Unauthorized(new { Message = "Credenciais inválidas." });
                 }
 

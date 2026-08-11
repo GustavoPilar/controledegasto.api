@@ -9,7 +9,6 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
-using System.Security.Claims;
 
 namespace ControleDeGasto.API.Api.Controllers
 {
@@ -268,6 +267,42 @@ namespace ControleDeGasto.API.Api.Controllers
                 return this.StatusCode(StatusCodes.Status500InternalServerError, new { Message = "Erro no servidor" });
             }
         }
+
+        #endregion
+
+        #region HttpPatch
+
+        [HttpPatch("profile")]
+        [ValidateAntiforgeryToken]
+        public async Task<ActionResult> PatchProfile(ProfileRequest request)
+        {
+            try
+            {
+                if (request is null)
+                    return this.BadRequest(new { Message = "Dados inválidos" });
+
+                User? user = await this.UserManager.GetUserAsync(this.User);
+
+                if (user is null)
+                    return this.BadRequest("Credenciais inválidas.");
+
+                user.FullName = request.FullName;
+                user.UserName = request.UserName;
+                user.UpdatedAt = DateTime.UtcNow;
+
+                IdentityResult result = await this.UserManager.UpdateAsync(user);
+
+                if (!result.Succeeded)
+                    return this.BadRequest(new { Message = result.Errors.First().Description });
+
+                return this.Ok();
+            }
+            catch (Exception ex)
+            {
+                this.Logger.LogError(ex, ex.Message);
+                return this.StatusCode(StatusCodes.Status500InternalServerError, new { Message = "Erro no servidor" });
+            }
+        }    
 
         #endregion
 

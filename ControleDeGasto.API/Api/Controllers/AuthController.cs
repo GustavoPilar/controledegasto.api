@@ -21,7 +21,9 @@ namespace ControleDeGasto.API.Api.Controllers
         ILogger<AuthController> logger,
         IConfiguration configuration,
         IEmailSender emailSender,
-        IOptions<AppSettings> appSettings) : ControllerBase
+        IOptions<AppSettings> appSettings,
+        IUserService userService,
+        ICategoryService categoryService) : ControllerBase
     {
         #region Fields
 
@@ -32,6 +34,8 @@ namespace ControleDeGasto.API.Api.Controllers
         private readonly ILogger<AuthController> Logger = logger;
         private readonly IEmailSender EmailSender = emailSender;
         private readonly AppSettings AppSettings = appSettings.Value;
+        private readonly IUserService userService = userService;
+        private readonly ICategoryService categoryService = categoryService;
 
         private string emailConfirmationBaseUrl => $"{this.AppSettings.FrontendBaseUrl}/confirmEmail";
 
@@ -55,6 +59,8 @@ namespace ControleDeGasto.API.Api.Controllers
 
         #endregion
 
+        // A atualização de perfil vive em PUT /api/user/profile, junto das demais operações
+        // sobre o usuário. Este controller cuida apenas de autenticação.
         #region Members Actions :: HttpGet, HttpPost
 
         #region HttpGet
@@ -114,26 +120,6 @@ namespace ControleDeGasto.API.Api.Controllers
             }
         }
 
-        [HttpGet("me")]
-        public async Task<ActionResult<UserResponse>> Me()
-        {
-            try
-            {
-
-                User? user = await this.UserManager.GetUserAsync(this.User);
-
-                if (user is null)
-                    return this.NotFound(new { Message = "Usuário não encontrado." });
-
-                return this.Ok(user);
-            }
-            catch (Exception ex)
-            {
-                this.Logger.LogError(ex, ex.Message);
-                return this.StatusCode(StatusCodes.Status500InternalServerError, new { Message = "Erro no servidor." });
-            }
-        }
-
         #endregion
 
         #region HttpPost
@@ -142,31 +128,37 @@ namespace ControleDeGasto.API.Api.Controllers
         [AllowAnonymous]
         [ValidateAntiforgeryToken]
         [EnableRateLimiting("RegisterPolicy")]
-        public async Task<ActionResult> Register(UserRequest request)
+        public async Task<ActionResult> Register(RegisterRequest request)
         {
             try
             {
-                User? user = await this.UserManager.FindByNameAsync(request.UserName);
+                ArgumentNullException.ThrowIfNull(request, nameof(request));
+                ArgumentNullException.ThrowIfNull(request.UserRequest, nameof(request.UserRequest));
+
+                if (!this.ModelState.IsValid)
+                    return this.BadRequest(new { Message = "Cadastro inválido." });
+
+                User? user = await this.UserManager.FindByNameAsync(request.UserRequest.UserName);
 
                 if (user is not null)
                     return BadRequest(new { Message = "Cadastro inválido." });
 
-                user = await this.UserManager.FindByEmailAsync(request.Email);
+                user = await this.UserManager.FindByEmailAsync(request.UserRequest.Email);
 
                 if (user is not null)
                     return BadRequest(new { Message = "Cadastro inválido." });
 
                 user = new User()
                 {
-                    FullName = request.FullName,
-                    Email = request.Email,
+                    FullName = request.UserRequest.FullName,
+                    Email = request.UserRequest.Email,
                     EmailConfirmed = false,
-                    UserName = request.UserName,
+                    UserName = request.UserRequest.UserName,
                     Active = true,
                     CreatedAt = DateTime.UtcNow,
                 };
 
-                IdentityResult result = await this.UserManager.CreateAsync(user, request.Password);
+                IdentityResult result = await this.UserManager.CreateAsync(user, request.UserRequest.Password);
 
                 if (!result.Succeeded)
                     return BadRequest(new { Message = result.Errors.First().Description });
@@ -179,6 +171,29 @@ namespace ControleDeGasto.API.Api.Controllers
 
                     return BadRequest(new { Message = roleResult.Errors.First().Description });
                 }
+
+                // A preferência é opcional no payload: quando o visitante não escolheu tema na
+                // tela de login, o serviço assume o tema claro.
+                UserPreference? userPreference = await this.userService.CreateUserPreferenceAsync(user, request.UserPreference);
+
+                if (userPreference is null)
+                {
+                    // Compensação: o Identity já commitou o usuário e o papel em transações
+                    // próprias, então a única forma de não deixar conta órfã de preferência é
+                    // desfazer o cadastro.
+                    await this.UserManager.DeleteAsync(user);
+
+                    this.Logger.LogError("Cadastro desfeito: falha ao criar preferência do usuário {UserId}.", user.Id);
+                    return BadRequest(new { Message = "Erro ao salvar preferência de usuário" });
+                }
+
+                // Categorias padrão: sem elas a conta nova não conseguiria lançar nada antes de
+                // cadastrar categorias na mão. A falha aqui não desfaz o cadastro — o usuário
+                // consegue criar as próprias categorias — mas é registrada para investigação.
+                int defaultCategories = await this.categoryService.CreateDefaultsAsync(user.Id);
+
+                if (defaultCategories == 0)
+                    this.Logger.LogWarning("Nenhuma categoria padrão criada para o usuário {UserId}.", user.Id);
 
                 string token = await this.UserManager.GenerateEmailConfirmationTokenAsync(user);
 
@@ -239,6 +254,10 @@ namespace ControleDeGasto.API.Api.Controllers
 
                 this.IssueAntiforgeryCookie();
 
+                // Carrega a preferência para o cliente aplicar o tema já na resposta do login,
+                // sem um segundo round-trip que causaria flash do tema anterior.
+                user.UserPreference = await this.userService.GetUserPreferenceAsync(user.Id);
+
                 this.Logger.LogInformation("Usuário {UserId} autenticado com sucesso.", user.Id);
                 return this.Ok(new UserResponse(user));
             }
@@ -267,42 +286,6 @@ namespace ControleDeGasto.API.Api.Controllers
                 return this.StatusCode(StatusCodes.Status500InternalServerError, new { Message = "Erro no servidor" });
             }
         }
-
-        #endregion
-
-        #region HttpPatch
-
-        [HttpPatch("profile")]
-        [ValidateAntiforgeryToken]
-        public async Task<ActionResult> PatchProfile(ProfileRequest request)
-        {
-            try
-            {
-                if (request is null)
-                    return this.BadRequest(new { Message = "Dados inválidos" });
-
-                User? user = await this.UserManager.GetUserAsync(this.User);
-
-                if (user is null)
-                    return this.BadRequest("Credenciais inválidas.");
-
-                user.FullName = request.FullName;
-                user.UserName = request.UserName;
-                user.UpdatedAt = DateTime.UtcNow;
-
-                IdentityResult result = await this.UserManager.UpdateAsync(user);
-
-                if (!result.Succeeded)
-                    return this.BadRequest(new { Message = result.Errors.First().Description });
-
-                return this.Ok();
-            }
-            catch (Exception ex)
-            {
-                this.Logger.LogError(ex, ex.Message);
-                return this.StatusCode(StatusCodes.Status500InternalServerError, new { Message = "Erro no servidor" });
-            }
-        }    
 
         #endregion
 

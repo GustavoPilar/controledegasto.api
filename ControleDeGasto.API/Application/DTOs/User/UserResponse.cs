@@ -22,5 +22,13 @@ namespace ControleDeGasto.API.Application.DTOs
 
         public bool Active { get; set; } = user.Active;
 
+        /// <summary>
+        /// Preferências da conta. Vai junto do login para o cliente aplicar o tema sem um
+        /// segundo round-trip (o que causaria flash do tema anterior).
+        /// Nulo apenas se a navegação não foi carregada.
+        /// </summary>
+        public UserPreferenceResponse? Preference { get; set; } =
+            user.UserPreference is null ? null : new UserPreferenceResponse(user.UserPreference);
+
     }
 }

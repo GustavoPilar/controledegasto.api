@@ -13,5 +13,7 @@ namespace ControleDeGasto.API.Domain.Entities
         public DateTime? DeactivatedAt { get; set; }
 
         public bool Active { get; set; }
+
+        public UserPreference? UserPreference { get; set; }
     }
 }

@@ -3,17 +3,33 @@ using ControleDeGasto.API.Application.Configuration;
 using ControleDeGasto.API.Application.Interfaces;
 using ControleDeGasto.API.Application.Services;
 using ControleDeGasto.API.Domain.Entities;
+using ControleDeGasto.API.Domain.Interfaces;
+using ControleDeGasto.API.Infra.BackgroundServices;
 using ControleDeGasto.API.Infra.Persistence;
+using ControleDeGasto.API.Infra.Repositories;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.RateLimiting;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
 
-builder.Services.AddControllers();
+// Enums trafegam como string em camelCase ("light", "dark", "system") em vez de número:
+// o contrato fica legível e o cliente não depende da ordem dos membros do enum.
+builder.Services.AddControllers(options =>
+    {
+        // Filtro global de exceção: evita try/catch repetido em cada action e garante que
+        // detalhe de exceção nunca chegue ao cliente.
+        options.Filters.Add<ApiExceptionFilter>();
+    })
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
+    });
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 
@@ -170,6 +186,27 @@ builder.Services.AddScoped<ValidateAntiforgeryTokenFilter>();
 builder.Services.Configure<AppSettings>(builder.Configuration.GetSection("AppSettings"));
 builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("EmailSettings"));
 builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
+
+builder.Services.AddScoped<IUserRepository, UserRepository>();
+builder.Services.AddScoped<IUserService, UserService>();
+
+builder.Services.AddScoped<ICategoryRepository, CategoryRepository>();
+builder.Services.AddScoped<ICategoryService, CategoryService>();
+
+builder.Services.AddScoped<ITransactionRepository, TransactionRepository>();
+builder.Services.AddScoped<ITransactionService, TransactionService>();
+
+builder.Services.AddScoped<ISavingsGoalRepository, SavingsGoalRepository>();
+builder.Services.AddScoped<ISavingsGoalService, SavingsGoalService>();
+
+builder.Services.AddScoped<INotificationRepository, NotificationRepository>();
+builder.Services.AddScoped<INotificationService, NotificationService>();
+
+builder.Services.AddScoped<IDashboardService, DashboardService>();
+
+// Rotina periódica de avisos e envio de e-mail (SMTP do Brevo, configurado em EmailSettings).
+builder.Services.Configure<NotificationSettings>(builder.Configuration.GetSection("NotificationSettings"));
+builder.Services.AddHostedService<NotificationWorker>();
 
 // Vale para todos os tokens do DataProtection (confirmação de e-mail, reset de senha).
 // 15 minutos dão folga para o e-mail ser entregue e aberto, sem deixar um link

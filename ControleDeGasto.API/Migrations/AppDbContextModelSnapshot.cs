@@ -74,6 +74,161 @@ namespace ControleDeGasto.API.Migrations
                     b.ToTable("Categories");
                 });
 
+            modelBuilder.Entity("ControleDeGasto.API.Domain.Entities.FixedEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<Guid?>("CategoryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("DayOfMonth")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<DateTime?>("EndsOn")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<DateTime>("StartsOn")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("WalletId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CategoryId");
+
+                    b.HasIndex("WalletId");
+
+                    b.HasIndex("UserId", "Active", "Kind");
+
+                    b.ToTable("FixedEntries", t =>
+                        {
+                            t.HasCheckConstraint("CK_FixedEntries_DayOfMonth", "\"DayOfMonth\" BETWEEN 1 AND 31");
+                        });
+                });
+
+            modelBuilder.Entity("ControleDeGasto.API.Domain.Entities.Friendship", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AddresseeId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("BlockedByUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("RequestedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("RequesterId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("RespondedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AddresseeId", "Status");
+
+                    b.HasIndex("RequesterId", "AddresseeId")
+                        .IsUnique();
+
+                    b.HasIndex("RequesterId", "Status");
+
+                    b.ToTable("Friendships", t =>
+                        {
+                            t.HasCheckConstraint("CK_Friendships_DifferentUsers", "\"RequesterId\" <> \"AddresseeId\"");
+                        });
+                });
+
+            modelBuilder.Entity("ControleDeGasto.API.Domain.Entities.InstallmentPlan", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CategoryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<DateTime>("FirstDueDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("InstallmentCount")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("PaymentMethod")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<decimal>("TotalAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("WalletId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CategoryId");
+
+                    b.HasIndex("WalletId");
+
+                    b.HasIndex("UserId", "CreatedAt")
+                        .IsDescending(false, true);
+
+                    b.ToTable("InstallmentPlans", t =>
+                        {
+                            t.HasCheckConstraint("CK_InstallmentPlans_InstallmentCount", "\"InstallmentCount\" BETWEEN 2 AND 360");
+                        });
+                });
+
             modelBuilder.Entity("ControleDeGasto.API.Domain.Entities.Notification", b =>
                 {
                     b.Property<Guid>("Id")
@@ -233,6 +388,71 @@ namespace ControleDeGasto.API.Migrations
                     b.ToTable("SavingsGoalContributions");
                 });
 
+            modelBuilder.Entity("ControleDeGasto.API.Domain.Entities.SavingsGoalMember", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("JoinedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<Guid>("SavingsGoalId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SavingsGoalId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_SavingsGoalMembers_SavingsGoalId_Owner")
+                        .HasFilter("\"Role\" = 'Owner'");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("SavingsGoalId", "UserId")
+                        .IsUnique();
+
+                    b.ToTable("SavingsGoalMembers");
+                });
+
+            modelBuilder.Entity("ControleDeGasto.API.Domain.Entities.Tag", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Color")
+                        .IsRequired()
+                        .HasMaxLength(7)
+                        .HasColumnType("character varying(7)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId", "Name")
+                        .IsUnique();
+
+                    b.ToTable("Tags");
+                });
+
             modelBuilder.Entity("ControleDeGasto.API.Domain.Entities.Transaction", b =>
                 {
                     b.Property<Guid>("Id")
@@ -254,6 +474,15 @@ namespace ControleDeGasto.API.Migrations
                         .HasMaxLength(120)
                         .HasColumnType("character varying(120)");
 
+                    b.Property<DateTime?>("DueDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("InstallmentNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid?>("InstallmentPlanId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("OccurredOn")
                         .HasColumnType("timestamp with time zone");
 
@@ -262,22 +491,95 @@ namespace ControleDeGasto.API.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
 
+                    b.Property<DateTime?>("SettledAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("Settled");
+
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<Guid>("UserId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("WalletId")
+                        .HasColumnType("uuid");
+
                     b.HasKey("Id");
 
                     b.HasIndex("CategoryId");
+
+                    b.HasIndex("InstallmentPlanId");
+
+                    b.HasIndex("WalletId");
+
+                    b.HasIndex("UserId", "DueDate")
+                        .HasDatabaseName("IX_Transactions_UserId_DueDate_Pending")
+                        .HasFilter("\"Status\" = 'Pending'");
 
                     b.HasIndex("UserId", "OccurredOn")
                         .IsDescending(false, true);
 
                     b.HasIndex("UserId", "CategoryId", "OccurredOn");
 
-                    b.ToTable("Transactions");
+                    b.HasIndex("UserId", "WalletId", "OccurredOn");
+
+                    b.ToTable("Transactions", t =>
+                        {
+                            t.HasCheckConstraint("CK_Transactions_InstallmentNumber", "\"InstallmentNumber\" IS NULL OR \"InstallmentNumber\" >= 1");
+                        });
+                });
+
+            modelBuilder.Entity("ControleDeGasto.API.Domain.Entities.TransactionShare", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("FriendUserId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("SettledAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("TransactionId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FriendUserId", "SettledAt");
+
+                    b.HasIndex("TransactionId", "FriendUserId")
+                        .IsUnique();
+
+                    b.ToTable("TransactionShares");
+                });
+
+            modelBuilder.Entity("ControleDeGasto.API.Domain.Entities.TransactionTag", b =>
+                {
+                    b.Property<Guid>("TransactionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("TagId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("TransactionId", "TagId");
+
+                    b.HasIndex("TagId");
+
+                    b.ToTable("TransactionTags");
                 });
 
             modelBuilder.Entity("ControleDeGasto.API.Domain.Entities.User", b =>
@@ -384,6 +686,126 @@ namespace ControleDeGasto.API.Migrations
                     b.HasKey("UserId");
 
                     b.ToTable("UserPreferences");
+                });
+
+            modelBuilder.Entity("ControleDeGasto.API.Domain.Entities.Wallet", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("Active")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Color")
+                        .IsRequired()
+                        .HasMaxLength(7)
+                        .HasColumnType("character varying(7)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<decimal?>("CreditLimit")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<string>("Icon")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<decimal>("InitialBalance")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<bool>("IsDefault")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)");
+
+                    b.Property<int?>("PaymentDueDay")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("StatementClosingDay")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_Wallets_UserId_Default")
+                        .HasFilter("\"IsDefault\" = true");
+
+                    b.HasIndex("UserId", "Active");
+
+                    b.HasIndex("UserId", "Name")
+                        .IsUnique()
+                        .HasFilter("\"Active\" = true");
+
+                    b.ToTable("Wallets", t =>
+                        {
+                            t.HasCheckConstraint("CK_Wallets_PaymentDueDay", "\"PaymentDueDay\" IS NULL OR (\"PaymentDueDay\" BETWEEN 1 AND 31)");
+
+                            t.HasCheckConstraint("CK_Wallets_StatementClosingDay", "\"StatementClosingDay\" IS NULL OR (\"StatementClosingDay\" BETWEEN 1 AND 31)");
+                        });
+                });
+
+            modelBuilder.Entity("ControleDeGasto.API.Domain.Entities.WalletTransfer", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("FromWalletId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<DateTime>("OccurredOn")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("ToWalletId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FromWalletId");
+
+                    b.HasIndex("ToWalletId");
+
+                    b.HasIndex("UserId", "OccurredOn")
+                        .IsDescending(false, true);
+
+                    b.ToTable("WalletTransfers", t =>
+                        {
+                            t.HasCheckConstraint("CK_WalletTransfers_DifferentWallets", "\"FromWalletId\" <> \"ToWalletId\"");
+                        });
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRole<System.Guid>", b =>
@@ -527,6 +949,76 @@ namespace ControleDeGasto.API.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("ControleDeGasto.API.Domain.Entities.FixedEntry", b =>
+                {
+                    b.HasOne("ControleDeGasto.API.Domain.Entities.Category", "Category")
+                        .WithMany()
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ControleDeGasto.API.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ControleDeGasto.API.Domain.Entities.Wallet", "Wallet")
+                        .WithMany()
+                        .HasForeignKey("WalletId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Category");
+
+                    b.Navigation("User");
+
+                    b.Navigation("Wallet");
+                });
+
+            modelBuilder.Entity("ControleDeGasto.API.Domain.Entities.Friendship", b =>
+                {
+                    b.HasOne("ControleDeGasto.API.Domain.Entities.User", "Addressee")
+                        .WithMany()
+                        .HasForeignKey("AddresseeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ControleDeGasto.API.Domain.Entities.User", "Requester")
+                        .WithMany()
+                        .HasForeignKey("RequesterId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Addressee");
+
+                    b.Navigation("Requester");
+                });
+
+            modelBuilder.Entity("ControleDeGasto.API.Domain.Entities.InstallmentPlan", b =>
+                {
+                    b.HasOne("ControleDeGasto.API.Domain.Entities.Category", "Category")
+                        .WithMany()
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ControleDeGasto.API.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ControleDeGasto.API.Domain.Entities.Wallet", "Wallet")
+                        .WithMany()
+                        .HasForeignKey("WalletId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Category");
+
+                    b.Navigation("User");
+
+                    b.Navigation("Wallet");
+                });
+
             modelBuilder.Entity("ControleDeGasto.API.Domain.Entities.Notification", b =>
                 {
                     b.HasOne("ControleDeGasto.API.Domain.Entities.User", "User")
@@ -568,6 +1060,36 @@ namespace ControleDeGasto.API.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("ControleDeGasto.API.Domain.Entities.SavingsGoalMember", b =>
+                {
+                    b.HasOne("ControleDeGasto.API.Domain.Entities.SavingsGoal", "SavingsGoal")
+                        .WithMany("Members")
+                        .HasForeignKey("SavingsGoalId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ControleDeGasto.API.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("SavingsGoal");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("ControleDeGasto.API.Domain.Entities.Tag", b =>
+                {
+                    b.HasOne("ControleDeGasto.API.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("ControleDeGasto.API.Domain.Entities.Transaction", b =>
                 {
                     b.HasOne("ControleDeGasto.API.Domain.Entities.Category", "Category")
@@ -576,15 +1098,67 @@ namespace ControleDeGasto.API.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ControleDeGasto.API.Domain.Entities.InstallmentPlan", "InstallmentPlan")
+                        .WithMany("Installments")
+                        .HasForeignKey("InstallmentPlanId")
+                        .OnDelete(DeleteBehavior.Cascade);
+
                     b.HasOne("ControleDeGasto.API.Domain.Entities.User", "User")
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("ControleDeGasto.API.Domain.Entities.Wallet", "Wallet")
+                        .WithMany()
+                        .HasForeignKey("WalletId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Category");
 
+                    b.Navigation("InstallmentPlan");
+
                     b.Navigation("User");
+
+                    b.Navigation("Wallet");
+                });
+
+            modelBuilder.Entity("ControleDeGasto.API.Domain.Entities.TransactionShare", b =>
+                {
+                    b.HasOne("ControleDeGasto.API.Domain.Entities.User", "FriendUser")
+                        .WithMany()
+                        .HasForeignKey("FriendUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ControleDeGasto.API.Domain.Entities.Transaction", "Transaction")
+                        .WithMany("Shares")
+                        .HasForeignKey("TransactionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("FriendUser");
+
+                    b.Navigation("Transaction");
+                });
+
+            modelBuilder.Entity("ControleDeGasto.API.Domain.Entities.TransactionTag", b =>
+                {
+                    b.HasOne("ControleDeGasto.API.Domain.Entities.Tag", "Tag")
+                        .WithMany()
+                        .HasForeignKey("TagId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ControleDeGasto.API.Domain.Entities.Transaction", "Transaction")
+                        .WithMany("Tags")
+                        .HasForeignKey("TransactionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Tag");
+
+                    b.Navigation("Transaction");
                 });
 
             modelBuilder.Entity("ControleDeGasto.API.Domain.Entities.UserPreference", b =>
@@ -594,6 +1168,44 @@ namespace ControleDeGasto.API.Migrations
                         .HasForeignKey("ControleDeGasto.API.Domain.Entities.UserPreference", "UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("ControleDeGasto.API.Domain.Entities.Wallet", b =>
+                {
+                    b.HasOne("ControleDeGasto.API.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("ControleDeGasto.API.Domain.Entities.WalletTransfer", b =>
+                {
+                    b.HasOne("ControleDeGasto.API.Domain.Entities.Wallet", "FromWallet")
+                        .WithMany()
+                        .HasForeignKey("FromWalletId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ControleDeGasto.API.Domain.Entities.Wallet", "ToWallet")
+                        .WithMany()
+                        .HasForeignKey("ToWalletId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ControleDeGasto.API.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("FromWallet");
+
+                    b.Navigation("ToWallet");
 
                     b.Navigation("User");
                 });
@@ -649,9 +1261,23 @@ namespace ControleDeGasto.API.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("ControleDeGasto.API.Domain.Entities.InstallmentPlan", b =>
+                {
+                    b.Navigation("Installments");
+                });
+
             modelBuilder.Entity("ControleDeGasto.API.Domain.Entities.SavingsGoal", b =>
                 {
                     b.Navigation("Contributions");
+
+                    b.Navigation("Members");
+                });
+
+            modelBuilder.Entity("ControleDeGasto.API.Domain.Entities.Transaction", b =>
+                {
+                    b.Navigation("Shares");
+
+                    b.Navigation("Tags");
                 });
 
             modelBuilder.Entity("ControleDeGasto.API.Domain.Entities.User", b =>

@@ -37,5 +37,22 @@ namespace ControleDeGasto.API.Application.Interfaces
         Task<EmergencyReserveResponse> GetEmergencyReserveAsync(Guid userId);
 
         #endregion
+
+        #region Methods :: GetForecastAsync()
+
+        /// <summary>
+        /// Monta a previsão de entradas e saídas de um mês.
+        /// </summary>
+        /// <remarks>
+        /// Soma o que já foi liquidado, o que está lançado como previsto e o que as definições
+        /// fixas dizem que ainda vai acontecer, abatendo dos fixos o que já apareceu como
+        /// lançamento no mês para nada ser contado duas vezes.
+        /// </remarks>
+        /// <param name="userId">Dono dos dados.</param>
+        /// <param name="reference">Qualquer data do mês desejado. Nulo assume o mês atual.</param>
+        /// <returns>Previsão do mês com os itens que a compõem.</returns>
+        Task<MonthlyForecastResponse> GetForecastAsync(Guid userId, DateTime? reference);
+
+        #endregion
     }
 }

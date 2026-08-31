@@ -4,8 +4,13 @@ using ControleDeGasto.API.Domain.Enums;
 namespace ControleDeGasto.API.Application.Interfaces
 {
     /// <summary>
-    /// Regras de cofrinho e reserva de emergência.
+    /// Regras de cofrinho, participantes e reserva de emergência.
     /// </summary>
+    /// <remarks>
+    /// Onde a documentação diz "dono", leia "participante": um cofrinho compartilhado é visível
+    /// e movimentável por todos os seus participantes. As operações que mudam a configuração do
+    /// cofrinho — editar, convidar, arquivar, excluir — continuam restritas ao criador.
+    /// </remarks>
     public interface ISavingsGoalService
     {
         #region Methods :: GetAllAsync(), GetByIdAsync(), CreateAsync(), UpdateAsync(), SetStatusAsync(), DeleteAsync()
@@ -93,6 +98,51 @@ namespace ControleDeGasto.API.Application.Interfaces
         /// <returns>O cofrinho com o saldo atualizado, ou nulo se o movimento não existir para esse usuário.</returns>
         /// <exception cref="Domain.Exceptions.BusinessRuleViolationException">Remoção deixaria o saldo negativo.</exception>
         Task<SavingsGoalResponse?> DeleteContributionAsync(Guid userId, Guid contributionId);
+
+        #endregion
+
+        #region Methods :: GetMembersAsync(), AddMemberAsync(), RemoveMemberAsync(), LeaveAsync()
+
+        /// <summary>
+        /// Lista os participantes de um cofrinho, com quanto cada um aportou.
+        /// </summary>
+        /// <param name="userId">Participante que consulta.</param>
+        /// <param name="savingsGoalId">Identificador do cofrinho.</param>
+        /// <returns>Participantes, ou nulo quando o usuário não participa do cofrinho.</returns>
+        Task<IReadOnlyList<SavingsGoalMemberResponse>?> GetMembersAsync(Guid userId, Guid savingsGoalId);
+
+        /// <summary>
+        /// Adiciona um amigo como participante de um cofrinho.
+        /// </summary>
+        /// <param name="userId">Criador do cofrinho.</param>
+        /// <param name="savingsGoalId">Identificador do cofrinho.</param>
+        /// <param name="request">Amigo a adicionar.</param>
+        /// <returns>O cofrinho atualizado, ou nulo quando o usuário não participa do cofrinho.</returns>
+        /// <exception cref="Domain.Exceptions.BusinessRuleViolationException">Não é o criador, o convidado não é amigo, já participa, ou é a reserva de emergência.</exception>
+        Task<SavingsGoalResponse?> AddMemberAsync(Guid userId, Guid savingsGoalId, SavingsGoalMemberRequest request);
+
+        /// <summary>
+        /// Remove um participante de um cofrinho.
+        /// </summary>
+        /// <param name="userId">Criador do cofrinho.</param>
+        /// <param name="savingsGoalId">Identificador do cofrinho.</param>
+        /// <param name="memberUserId">Participante a remover.</param>
+        /// <returns>O cofrinho atualizado, ou nulo quando o cofrinho ou o participante não existem.</returns>
+        /// <exception cref="Domain.Exceptions.BusinessRuleViolationException">Não é o criador, tentou remover o dono, ou o participante tem aportes.</exception>
+        Task<SavingsGoalResponse?> RemoveMemberAsync(Guid userId, Guid savingsGoalId, Guid memberUserId);
+
+        /// <summary>
+        /// Sai de um cofrinho compartilhado.
+        /// </summary>
+        /// <remarks>
+        /// Separado de <see cref="RemoveMemberAsync"/> porque a permissão é oposta: remover é
+        /// coisa do criador, sair é direito de quem foi convidado.
+        /// </remarks>
+        /// <param name="userId">Participante que está saindo.</param>
+        /// <param name="savingsGoalId">Identificador do cofrinho.</param>
+        /// <returns>True se saiu; false quando o usuário não participa do cofrinho.</returns>
+        /// <exception cref="Domain.Exceptions.BusinessRuleViolationException">O criador não pode sair, ou o participante tem aportes.</exception>
+        Task<bool> LeaveAsync(Guid userId, Guid savingsGoalId);
 
         #endregion
     }

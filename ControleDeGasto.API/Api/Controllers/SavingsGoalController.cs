@@ -80,6 +80,91 @@ namespace ControleDeGasto.API.Api.Controllers
             return this.Ok(contributions);
         }
 
+        /// <summary>
+        /// Lista os participantes de um cofrinho.
+        /// </summary>
+        /// <param name="id">Identificador do cofrinho.</param>
+        /// <returns>Participantes com quanto cada um aportou.</returns>
+        [HttpGet("{id:guid}/member")]
+        public async Task<ActionResult<IReadOnlyList<SavingsGoalMemberResponse>>> GetMembers(Guid id)
+        {
+            if (!this.TryGetUserId(out Guid userId))
+                return this.Unauthorized(new { Message = "Credenciais inválidas." });
+
+            IReadOnlyList<SavingsGoalMemberResponse>? members = await this.service.GetMembersAsync(userId, id);
+
+            if (members is null)
+                return this.NotFound(new { Message = "Cofrinho não encontrado." });
+
+            return this.Ok(members);
+        }
+
+        #endregion
+
+        #region Actions :: HttpPost, HttpDelete :: Member
+
+        /// <summary>
+        /// Adiciona um amigo como participante de um cofrinho.
+        /// </summary>
+        /// <param name="id">Identificador do cofrinho.</param>
+        /// <param name="request">Amigo a adicionar.</param>
+        /// <returns>O cofrinho atualizado.</returns>
+        [HttpPost("{id:guid}/member")]
+        [ValidateAntiforgeryToken]
+        public async Task<ActionResult<SavingsGoalResponse>> AddMember(Guid id, SavingsGoalMemberRequest request)
+        {
+            if (!this.TryGetUserId(out Guid userId))
+                return this.Unauthorized(new { Message = "Credenciais inválidas." });
+
+            SavingsGoalResponse? savingsGoal = await this.service.AddMemberAsync(userId, id, request);
+
+            if (savingsGoal is null)
+                return this.NotFound(new { Message = "Cofrinho não encontrado." });
+
+            return this.Ok(savingsGoal);
+        }
+
+        /// <summary>
+        /// Remove um participante de um cofrinho.
+        /// </summary>
+        /// <param name="id">Identificador do cofrinho.</param>
+        /// <param name="memberUserId">Participante a remover.</param>
+        /// <returns>O cofrinho atualizado.</returns>
+        [HttpDelete("{id:guid}/member/{memberUserId:guid}")]
+        [ValidateAntiforgeryToken]
+        public async Task<ActionResult<SavingsGoalResponse>> RemoveMember(Guid id, Guid memberUserId)
+        {
+            if (!this.TryGetUserId(out Guid userId))
+                return this.Unauthorized(new { Message = "Credenciais inválidas." });
+
+            SavingsGoalResponse? savingsGoal = await this.service.RemoveMemberAsync(userId, id, memberUserId);
+
+            if (savingsGoal is null)
+                return this.NotFound(new { Message = "Participante não encontrado." });
+
+            return this.Ok(savingsGoal);
+        }
+
+        /// <summary>
+        /// Sai de um cofrinho compartilhado.
+        /// </summary>
+        /// <param name="id">Identificador do cofrinho.</param>
+        /// <returns>Sem conteúdo em caso de sucesso.</returns>
+        [HttpDelete("{id:guid}/member")]
+        [ValidateAntiforgeryToken]
+        public async Task<ActionResult> Leave(Guid id)
+        {
+            if (!this.TryGetUserId(out Guid userId))
+                return this.Unauthorized(new { Message = "Credenciais inválidas." });
+
+            bool left = await this.service.LeaveAsync(userId, id);
+
+            if (!left)
+                return this.NotFound(new { Message = "Cofrinho não encontrado." });
+
+            return this.NoContent();
+        }
+
         #endregion
 
         #region Actions :: HttpPost, HttpPut, HttpPatch, HttpDelete

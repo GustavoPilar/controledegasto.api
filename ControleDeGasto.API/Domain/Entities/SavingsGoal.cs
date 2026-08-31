@@ -13,11 +13,14 @@ namespace ControleDeGasto.API.Domain.Entities
     /// </remarks>
     public class SavingsGoal
     {
-        #region Properties :: Id, UserId, Name, TargetAmount, Deadline, Color, Icon, Status, IsEmergencyReserve, CreatedAt, UpdatedAt, CompletedAt, User, Contributions
+        #region Properties :: Id, UserId, Name, TargetAmount, Deadline, Color, Icon, Status, IsEmergencyReserve, CreatedAt, UpdatedAt, CompletedAt, User, Contributions, Members
 
         public Guid Id { get; set; }
 
-        /// <summary>Dono do cofrinho.</summary>
+        /// <summary>
+        /// Criador do cofrinho. Continua sendo quem edita, convida e exclui; os demais
+        /// participantes vivem em <see cref="Members"/>.
+        /// </summary>
         public Guid UserId { get; set; }
 
         public string Name { get; set; } = string.Empty;
@@ -52,6 +55,11 @@ namespace ControleDeGasto.API.Domain.Entities
         public User? User { get; set; }
 
         public ICollection<SavingsGoalContribution>? Contributions { get; set; }
+
+        /// <summary>
+        /// Participantes, incluindo o criador. Um cofrinho individual tem exatamente um.
+        /// </summary>
+        public ICollection<SavingsGoalMember>? Members { get; set; }
 
         #endregion
     }

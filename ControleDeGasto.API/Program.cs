@@ -202,6 +202,18 @@ builder.Services.AddScoped<ISavingsGoalService, SavingsGoalService>();
 builder.Services.AddScoped<INotificationRepository, NotificationRepository>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 
+builder.Services.AddScoped<IFriendshipRepository, FriendshipRepository>();
+builder.Services.AddScoped<IFriendshipService, FriendshipService>();
+
+builder.Services.AddScoped<IWalletRepository, WalletRepository>();
+builder.Services.AddScoped<IWalletService, WalletService>();
+
+builder.Services.AddScoped<IFixedEntryRepository, FixedEntryRepository>();
+builder.Services.AddScoped<IFixedEntryService, FixedEntryService>();
+
+builder.Services.AddScoped<ITagRepository, TagRepository>();
+builder.Services.AddScoped<ITagService, TagService>();
+
 builder.Services.AddScoped<IDashboardService, DashboardService>();
 
 // Rotina periódica de avisos e envio de e-mail (SMTP do Brevo, configurado em EmailSettings).

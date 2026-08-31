@@ -11,29 +11,51 @@ namespace ControleDeGasto.API.Application.Services
 {
     public class SavingsGoalService(
         ISavingsGoalRepository repository,
+        IFriendshipRepository friendshipRepository,
         INotificationService notificationService,
         ILogger<SavingsGoalService> logger) : ISavingsGoalService
     {
         #region Fields
 
         private readonly ISavingsGoalRepository repository = repository;
+        private readonly IFriendshipRepository friendshipRepository = friendshipRepository;
         private readonly INotificationService notificationService = notificationService;
         private readonly ILogger<SavingsGoalService> logger = logger;
 
         #endregion
 
-        #region Helpers :: BuildResponseAsync(), EnsureNameIsFreeAsync(), EnsureSingleEmergencyReserveAsync()
+        #region Helpers :: BuildResponseAsync(), EnsureOwner(), EnsureNameIsFreeAsync(), EnsureSingleEmergencyReserveAsync()
 
         /// <summary>
-        /// Monta a resposta de um cofrinho buscando o saldo atual.
+        /// Monta a resposta de um cofrinho buscando o saldo e o aporte de cada participante.
         /// </summary>
         /// <param name="savingsGoal">Cofrinho de origem.</param>
-        /// <returns>Resposta com saldo e progresso.</returns>
-        private async Task<SavingsGoalResponse> BuildResponseAsync(SavingsGoal savingsGoal)
+        /// <param name="currentUserId">Usuário que consulta.</param>
+        /// <returns>Resposta com saldo, progresso e participantes.</returns>
+        private async Task<SavingsGoalResponse> BuildResponseAsync(SavingsGoal savingsGoal, Guid currentUserId)
         {
-            decimal balance = await this.repository.GetBalanceAsync(savingsGoal.UserId, savingsGoal.Id);
+            decimal balance = await this.repository.GetBalanceAsync(savingsGoal.Id);
 
-            return new SavingsGoalResponse(savingsGoal, balance);
+            IReadOnlyDictionary<Guid, decimal> memberBalances = await this.repository.GetMemberBalancesAsync(savingsGoal.Id);
+
+            return new SavingsGoalResponse(savingsGoal, balance, currentUserId, memberBalances);
+        }
+
+        /// <summary>
+        /// Garante que quem está agindo é o criador do cofrinho.
+        /// </summary>
+        /// <remarks>
+        /// Editar, convidar, arquivar e excluir mexem na configuração do cofrinho: liberar isso
+        /// para qualquer participante permitiria que um convidado arquivasse o cofrinho de outra
+        /// pessoa ou trocasse a meta que ela definiu.
+        /// </remarks>
+        /// <param name="savingsGoal">Cofrinho alvo.</param>
+        /// <param name="userId">Usuário que está agindo.</param>
+        /// <exception cref="BusinessRuleViolationException">O usuário não é o criador.</exception>
+        private static void EnsureOwner(SavingsGoal savingsGoal, Guid userId)
+        {
+            if (savingsGoal.UserId != userId)
+                throw new BusinessRuleViolationException("Apenas quem criou o cofrinho pode fazer essa alteração.");
         }
 
         /// <summary>
@@ -87,9 +109,24 @@ namespace ControleDeGasto.API.Application.Services
 
             Dictionary<Guid, decimal> balanceByGoal = balances.ToDictionary(x => x.SavingsGoalId, x => x.Balance);
 
-            return goals
-                .Select(goal => new SavingsGoalResponse(goal, balanceByGoal.GetValueOrDefault(goal.Id)))
-                .ToList();
+            List<SavingsGoalResponse> responses = new List<SavingsGoalResponse>(goals.Count);
+
+            foreach (SavingsGoal goal in goals)
+            {
+                // O aporte por participante só é apurado nos compartilhados: em cofrinho
+                // individual o valor de cada um é o saldo total, e a consulta seria desperdício.
+                IReadOnlyDictionary<Guid, decimal>? memberBalances = (goal.Members?.Count ?? 0) > 1
+                    ? await this.repository.GetMemberBalancesAsync(goal.Id)
+                    : null;
+
+                responses.Add(new SavingsGoalResponse(
+                    goal,
+                    balanceByGoal.GetValueOrDefault(goal.Id),
+                    userId,
+                    memberBalances));
+            }
+
+            return responses;
         }
 
         /// <inheritdoc />
@@ -97,7 +134,7 @@ namespace ControleDeGasto.API.Application.Services
         {
             SavingsGoal? savingsGoal = await this.repository.GetByIdAsync(userId, savingsGoalId);
 
-            return savingsGoal is null ? null : await this.BuildResponseAsync(savingsGoal);
+            return savingsGoal is null ? null : await this.BuildResponseAsync(savingsGoal, userId);
         }
 
         #endregion
@@ -144,7 +181,9 @@ namespace ControleDeGasto.API.Application.Services
 
             this.logger.LogInformation("Cofrinho {SavingsGoalId} criado para o usuário {UserId}.", savingsGoal.Id, userId);
 
-            return new SavingsGoalResponse(savingsGoal, 0);
+            SavingsGoal? reloaded = await this.repository.GetByIdAsync(userId, savingsGoal.Id);
+
+            return new SavingsGoalResponse(reloaded ?? savingsGoal, 0, userId);
         }
 
         /// <inheritdoc />
@@ -157,12 +196,21 @@ namespace ControleDeGasto.API.Application.Services
             if (savingsGoal is null)
                 return null;
 
+            EnsureOwner(savingsGoal, userId);
+
             string name = request.Name.Trim();
 
             await this.EnsureNameIsFreeAsync(userId, name, savingsGoalId);
 
             if (request.IsEmergencyReserve && !savingsGoal.IsEmergencyReserve)
+            {
                 await this.EnsureSingleEmergencyReserveAsync(userId, savingsGoalId);
+
+                // Reserva de emergência é individual: transformar em reserva um cofrinho que
+                // outras pessoas movimentam misturaria o dinheiro delas no cálculo da reserva.
+                if ((savingsGoal.Members?.Count ?? 0) > 1)
+                    throw new BusinessRuleViolationException("Um cofrinho compartilhado não pode ser a reserva de emergência.");
+            }
 
             savingsGoal.Name = name;
             savingsGoal.TargetAmount = request.TargetAmount;
@@ -173,7 +221,7 @@ namespace ControleDeGasto.API.Application.Services
             savingsGoal.UpdatedAt = DateTime.UtcNow;
 
             // A meta pode ter subido ou descido: a situação é reavaliada contra o saldo real.
-            decimal balance = await this.repository.GetBalanceAsync(userId, savingsGoalId);
+            decimal balance = await this.repository.GetBalanceAsync(savingsGoalId);
 
             this.ApplyCompletionState(savingsGoal, balance);
 
@@ -184,7 +232,7 @@ namespace ControleDeGasto.API.Application.Services
 
             this.logger.LogInformation("Cofrinho {SavingsGoalId} atualizado pelo usuário {UserId}.", savingsGoalId, userId);
 
-            return new SavingsGoalResponse(savingsGoal, balance);
+            return await this.BuildResponseAsync(savingsGoal, userId);
         }
 
         /// <inheritdoc />
@@ -194,6 +242,8 @@ namespace ControleDeGasto.API.Application.Services
 
             if (savingsGoal is null)
                 return null;
+
+            EnsureOwner(savingsGoal, userId);
 
             savingsGoal.Status = status;
             savingsGoal.UpdatedAt = DateTime.UtcNow;
@@ -206,7 +256,7 @@ namespace ControleDeGasto.API.Application.Services
             if (!updated)
                 throw new BusinessRuleViolationException("Não foi possível alterar a situação do cofrinho.");
 
-            return await this.BuildResponseAsync(savingsGoal);
+            return await this.BuildResponseAsync(savingsGoal, userId);
         }
 
         /// <inheritdoc />
@@ -216,6 +266,13 @@ namespace ControleDeGasto.API.Application.Services
 
             if (savingsGoal is null)
                 return false;
+
+            EnsureOwner(savingsGoal, userId);
+
+            // Excluir levaria os aportes dos outros participantes junto. Enquanto houver mais
+            // gente dentro, a saída é remover os participantes ou arquivar.
+            if ((savingsGoal.Members?.Count ?? 0) > 1)
+                throw new BusinessRuleViolationException("Remova os outros participantes antes de excluir o cofrinho.");
 
             bool deleted = await this.repository.DeleteAsync(savingsGoal);
 
@@ -237,9 +294,11 @@ namespace ControleDeGasto.API.Application.Services
             if (savingsGoal is null)
                 return null;
 
-            IReadOnlyList<SavingsGoalContribution> contributions = await this.repository.GetContributionsAsync(userId, savingsGoalId, limit);
+            IReadOnlyList<SavingsGoalContribution> contributions = await this.repository.GetContributionsAsync(savingsGoalId, limit);
 
-            return contributions.Select(contribution => new ContributionResponse(contribution)).ToList();
+            return contributions
+                .Select(contribution => new ContributionResponse(contribution, userId))
+                .ToList();
         }
 
         /// <inheritdoc />
@@ -255,8 +314,11 @@ namespace ControleDeGasto.API.Application.Services
             if (savingsGoal.Status == SavingsGoalStatus.Archived)
                 throw new BusinessRuleViolationException("Não é possível movimentar um cofrinho arquivado.");
 
-            decimal balance = await this.repository.GetBalanceAsync(userId, savingsGoalId);
+            decimal balance = await this.repository.GetBalanceAsync(savingsGoalId);
 
+            // O resgate é limitado pelo saldo do cofrinho, não pelo que o participante aportou:
+            // em cofrinho compartilhado o dinheiro é comum, e travar por participante impediria
+            // um casal de usar a própria poupança conjunta.
             if (request.Kind == ContributionKind.Withdrawal && request.Amount > balance)
                 throw new BusinessRuleViolationException("O resgate é maior que o saldo do cofrinho.");
 
@@ -290,13 +352,13 @@ namespace ControleDeGasto.API.Application.Services
                 await this.NotifyGoalAchievedAsync(savingsGoal);
 
             this.logger.LogInformation(
-                "Movimento {Kind} de {Amount} registrado no cofrinho {SavingsGoalId} do usuário {UserId}.",
+                "Movimento {Kind} de {Amount} registrado no cofrinho {SavingsGoalId} pelo usuário {UserId}.",
                 contribution.Kind,
                 contribution.Amount,
                 savingsGoalId,
                 userId);
 
-            return new SavingsGoalResponse(savingsGoal, newBalance);
+            return await this.BuildResponseAsync(savingsGoal, userId);
         }
 
         /// <inheritdoc />
@@ -312,7 +374,7 @@ namespace ControleDeGasto.API.Application.Services
             if (savingsGoal is null)
                 return null;
 
-            decimal balance = await this.repository.GetBalanceAsync(userId, contribution.SavingsGoalId);
+            decimal balance = await this.repository.GetBalanceAsync(contribution.SavingsGoalId);
 
             // Remover um depósito reduz o saldo; se isso o deixaria negativo, existe um resgate
             // que dependia desse dinheiro e a remoção não pode acontecer.
@@ -333,12 +395,175 @@ namespace ControleDeGasto.API.Application.Services
             savingsGoal.UpdatedAt = DateTime.UtcNow;
             await this.repository.UpdateAsync(savingsGoal);
 
-            return new SavingsGoalResponse(savingsGoal, balanceAfter);
+            return await this.BuildResponseAsync(savingsGoal, userId);
         }
 
         #endregion
 
-        #region Helpers :: ApplyCompletionState(), NotifyGoalAchievedAsync()
+        #region Methods :: GetMembersAsync(), AddMemberAsync(), RemoveMemberAsync(), LeaveAsync()
+
+        /// <inheritdoc />
+        public async Task<IReadOnlyList<SavingsGoalMemberResponse>?> GetMembersAsync(Guid userId, Guid savingsGoalId)
+        {
+            bool participates = await this.repository.IsMemberAsync(savingsGoalId, userId);
+
+            if (!participates)
+                return null;
+
+            IReadOnlyList<SavingsGoalMember> members = await this.repository.GetMembersAsync(savingsGoalId);
+
+            IReadOnlyDictionary<Guid, decimal> balances = await this.repository.GetMemberBalancesAsync(savingsGoalId);
+
+            return members
+                .Select(member => new SavingsGoalMemberResponse(member, balances.GetValueOrDefault(member.UserId)))
+                .ToList();
+        }
+
+        /// <inheritdoc />
+        public async Task<SavingsGoalResponse?> AddMemberAsync(Guid userId, Guid savingsGoalId, SavingsGoalMemberRequest request)
+        {
+            ArgumentNullException.ThrowIfNull(request);
+
+            SavingsGoal? savingsGoal = await this.repository.GetByIdAsync(userId, savingsGoalId);
+
+            if (savingsGoal is null)
+                return null;
+
+            EnsureOwner(savingsGoal, userId);
+
+            if (savingsGoal.IsEmergencyReserve)
+                throw new BusinessRuleViolationException("A reserva de emergência é individual e não pode ser compartilhada.");
+
+            if (request.FriendUserId == userId)
+                throw new BusinessRuleViolationException("Você já participa deste cofrinho.");
+
+            bool areFriends = await this.friendshipRepository.AreFriendsAsync(userId, request.FriendUserId);
+
+            if (!areFriends)
+                throw new BusinessRuleViolationException("Só é possível compartilhar um cofrinho com amigos.");
+
+            bool alreadyMember = await this.repository.IsMemberAsync(savingsGoalId, request.FriendUserId);
+
+            if (alreadyMember)
+                throw new BusinessRuleViolationException("Este amigo já participa do cofrinho.");
+
+            SavingsGoalMember member = new SavingsGoalMember()
+            {
+                Id = Guid.NewGuid(),
+                SavingsGoalId = savingsGoalId,
+                UserId = request.FriendUserId,
+                Role = SavingsGoalMemberRole.Member,
+                JoinedAt = DateTime.UtcNow
+            };
+
+            bool added = await this.repository.AddMemberAsync(member);
+
+            if (!added)
+                throw new BusinessRuleViolationException("Não foi possível adicionar o participante.");
+
+            IReadOnlyList<UserSummary> summaries = await this.friendshipRepository.GetUserSummariesAsync([userId]);
+
+            string ownerName = summaries.FirstOrDefault()?.FullName ?? "Um amigo";
+
+            await this.notificationService.CreateAsync(
+                request.FriendUserId,
+                NotificationType.SharedGoalJoined,
+                "Você entrou em um cofrinho compartilhado",
+                $"{ownerName} adicionou você ao cofrinho \"{savingsGoal.Name}\". Agora vocês guardam juntos.",
+                savingsGoalId,
+                dedupeWindow: TimeSpan.FromDays(1));
+
+            this.logger.LogInformation(
+                "Participante {MemberUserId} adicionado ao cofrinho {SavingsGoalId} por {UserId}.",
+                request.FriendUserId,
+                savingsGoalId,
+                userId);
+
+            SavingsGoal? reloaded = await this.repository.GetByIdAsync(userId, savingsGoalId);
+
+            return await this.BuildResponseAsync(reloaded ?? savingsGoal, userId);
+        }
+
+        /// <inheritdoc />
+        public async Task<SavingsGoalResponse?> RemoveMemberAsync(Guid userId, Guid savingsGoalId, Guid memberUserId)
+        {
+            SavingsGoal? savingsGoal = await this.repository.GetByIdAsync(userId, savingsGoalId);
+
+            if (savingsGoal is null)
+                return null;
+
+            EnsureOwner(savingsGoal, userId);
+
+            SavingsGoalMember? member = await this.repository.GetMemberAsync(savingsGoalId, memberUserId);
+
+            if (member is null)
+                return null;
+
+            if (member.Role == SavingsGoalMemberRole.Owner)
+                throw new BusinessRuleViolationException("O criador não pode ser removido do cofrinho.");
+
+            await this.EnsureMemberHasNoContributionsAsync(savingsGoalId, memberUserId);
+
+            bool removed = await this.repository.RemoveMemberAsync(member);
+
+            if (!removed)
+                throw new BusinessRuleViolationException("Não foi possível remover o participante.");
+
+            this.logger.LogInformation(
+                "Participante {MemberUserId} removido do cofrinho {SavingsGoalId} por {UserId}.",
+                memberUserId,
+                savingsGoalId,
+                userId);
+
+            SavingsGoal? reloaded = await this.repository.GetByIdAsync(userId, savingsGoalId);
+
+            return await this.BuildResponseAsync(reloaded ?? savingsGoal, userId);
+        }
+
+        /// <inheritdoc />
+        public async Task<bool> LeaveAsync(Guid userId, Guid savingsGoalId)
+        {
+            SavingsGoalMember? member = await this.repository.GetMemberAsync(savingsGoalId, userId);
+
+            if (member is null)
+                return false;
+
+            if (member.Role == SavingsGoalMemberRole.Owner)
+                throw new BusinessRuleViolationException("O criador não pode sair do cofrinho. Exclua-o ou remova os participantes.");
+
+            await this.EnsureMemberHasNoContributionsAsync(savingsGoalId, userId);
+
+            bool removed = await this.repository.RemoveMemberAsync(member);
+
+            if (removed)
+                this.logger.LogInformation("Usuário {UserId} saiu do cofrinho {SavingsGoalId}.", userId, savingsGoalId);
+
+            return removed;
+        }
+
+        #endregion
+
+        #region Helpers :: EnsureMemberHasNoContributionsAsync(), ApplyCompletionState(), NotifyGoalAchievedAsync()
+
+        /// <summary>
+        /// Garante que o participante não tem dinheiro dentro do cofrinho.
+        /// </summary>
+        /// <remarks>
+        /// Sair com saldo aportado deixaria dinheiro de alguém em um cofrinho a que essa pessoa
+        /// não tem mais acesso. O caminho é resgatar a parte antes de sair.
+        /// </remarks>
+        /// <param name="savingsGoalId">Identificador do cofrinho.</param>
+        /// <param name="memberUserId">Participante a verificar.</param>
+        /// <exception cref="BusinessRuleViolationException">O participante ainda tem saldo aportado.</exception>
+        private async Task EnsureMemberHasNoContributionsAsync(Guid savingsGoalId, Guid memberUserId)
+        {
+            IReadOnlyDictionary<Guid, decimal> balances = await this.repository.GetMemberBalancesAsync(savingsGoalId);
+
+            decimal contributed = balances.GetValueOrDefault(memberUserId);
+
+            if (contributed != 0)
+                throw new BusinessRuleViolationException("Este participante ainda tem aportes no cofrinho. Resgate a parte dele antes de removê-lo.");
+        }
 
         /// <summary>
         /// Sincroniza a situação do cofrinho com o saldo apurado.
@@ -373,7 +598,7 @@ namespace ControleDeGasto.API.Application.Services
         }
 
         /// <summary>
-        /// Cria a notificação de meta atingida.
+        /// Cria a notificação de meta atingida para todos os participantes.
         /// </summary>
         /// <param name="savingsGoal">Cofrinho que atingiu a meta.</param>
         private async Task NotifyGoalAchievedAsync(SavingsGoal savingsGoal)
@@ -384,13 +609,20 @@ namespace ControleDeGasto.API.Application.Services
 
             string message = $"Você alcançou {savingsGoal.TargetAmount:C2} em \"{savingsGoal.Name}\". Parabéns pela disciplina!";
 
-            await this.notificationService.CreateAsync(
-                savingsGoal.UserId,
-                NotificationType.GoalAchieved,
-                title,
-                message,
-                savingsGoal.Id,
-                dedupeWindow: null);
+            // Em cofrinho compartilhado a conquista é de todos: avisar só o criador esconderia o
+            // resultado de quem também guardou.
+            IReadOnlyList<SavingsGoalMember> members = await this.repository.GetMembersAsync(savingsGoal.Id);
+
+            foreach (SavingsGoalMember member in members)
+            {
+                await this.notificationService.CreateAsync(
+                    member.UserId,
+                    NotificationType.GoalAchieved,
+                    title,
+                    message,
+                    savingsGoal.Id,
+                    dedupeWindow: null);
+            }
         }
 
         #endregion

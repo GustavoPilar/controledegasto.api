@@ -70,6 +70,20 @@ namespace ControleDeGasto.API.Api.Controllers
             return this.Ok(await this.service.GetEmergencyReserveAsync(userId));
         }
 
+        /// <summary>
+        /// Monta a previsão de entradas e saídas de um mês.
+        /// </summary>
+        /// <param name="reference">Qualquer data do mês desejado. Nulo assume o mês atual.</param>
+        /// <returns>Previsão do mês com os itens que a compõem.</returns>
+        [HttpGet("forecast")]
+        public async Task<ActionResult<MonthlyForecastResponse>> GetForecast([FromQuery] DateTime? reference = null)
+        {
+            if (!this.TryGetUserId(out Guid userId))
+                return this.Unauthorized(new { Message = "Credenciais inválidas." });
+
+            return this.Ok(await this.service.GetForecastAsync(userId, reference));
+        }
+
         #endregion
     }
 }

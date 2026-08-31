@@ -4,15 +4,20 @@ using ControleDeGasto.API.Application.Utilities;
 using ControleDeGasto.API.Domain.Entities;
 using ControleDeGasto.API.Domain.Enums;
 using ControleDeGasto.API.Domain.Interfaces;
+using ControleDeGasto.API.Domain.Queries;
 using ControleDeGasto.API.Domain.ReadModels;
 
 namespace ControleDeGasto.API.Application.Services
 {
     public class DashboardService(
         ITransactionRepository transactionRepository,
-        ISavingsGoalRepository savingsGoalRepository) : IDashboardService
+        ISavingsGoalRepository savingsGoalRepository,
+        IFixedEntryRepository fixedEntryRepository,
+        IWalletService walletService,
+        ITagService tagService,
+        IFriendshipRepository friendshipRepository) : IDashboardService
     {
-        #region Constants :: EMERGENCY_RESERVE_MONTHS, AVERAGE_EXPENSE_WINDOW_MONTHS, TOP_CATEGORIES_LIMIT, RECENT_TRANSACTIONS_LIMIT, EVOLUTION_WINDOW_MONTHS
+        #region Constants :: EMERGENCY_RESERVE_MONTHS, AVERAGE_EXPENSE_WINDOW_MONTHS, TOP_CATEGORIES_LIMIT, RECENT_TRANSACTIONS_LIMIT, EVOLUTION_WINDOW_MONTHS, UPCOMING_WINDOW_DAYS, BILLS_LIMIT
 
         /// <summary>Meses de gasto médio que a reserva de emergência deve cobrir.</summary>
         public const int EMERGENCY_RESERVE_MONTHS = 6;
@@ -29,12 +34,22 @@ namespace ControleDeGasto.API.Application.Services
         /// <summary>Meses exibidos no gráfico de evolução.</summary>
         private const int EVOLUTION_WINDOW_MONTHS = 6;
 
+        /// <summary>Janela de dias do bloco "contas a vencer".</summary>
+        private const int UPCOMING_WINDOW_DAYS = 15;
+
+        /// <summary>Quantidade de contas exibidas nos blocos de vencimento.</summary>
+        private const int BILLS_LIMIT = 8;
+
         #endregion
 
         #region Fields
 
         private readonly ITransactionRepository transactionRepository = transactionRepository;
         private readonly ISavingsGoalRepository savingsGoalRepository = savingsGoalRepository;
+        private readonly IFixedEntryRepository fixedEntryRepository = fixedEntryRepository;
+        private readonly IWalletService walletService = walletService;
+        private readonly ITagService tagService = tagService;
+        private readonly IFriendshipRepository friendshipRepository = friendshipRepository;
 
         #endregion
 
@@ -81,6 +96,8 @@ namespace ControleDeGasto.API.Application.Services
         {
             (DateTime start, DateTime end) = ResolvePeriod(from, to);
 
+            DateTime today = DateTimeHelper.ToUtcDate(DateTime.UtcNow);
+
             IReadOnlyList<TypeTotal> typeTotals = await this.transactionRepository.GetTotalsByTypeAsync(userId, start, end);
 
             decimal totalIncome = SumOf(typeTotals, TransactionType.Income);
@@ -106,6 +123,16 @@ namespace ControleDeGasto.API.Application.Services
 
             Dictionary<Guid, decimal> balanceByGoal = balances.ToDictionary(x => x.SavingsGoalId, x => x.Balance);
 
+            IReadOnlyList<Transaction> upcoming = await this.transactionRepository
+                .GetUpcomingAsync(userId, today, today.AddDays(UPCOMING_WINDOW_DAYS), BILLS_LIMIT);
+
+            IReadOnlyList<Transaction> overdue = await this.transactionRepository
+                .GetOverdueAsync(userId, today, BILLS_LIMIT);
+
+            IReadOnlyList<WalletResponse> wallets = await this.walletService.GetAllAsync(userId, includeInactive: false);
+
+            IReadOnlyList<TagTotalResponse> tagTotals = await this.tagService.GetTotalsAsync(userId, start, end);
+
             return new DashboardResponse()
             {
                 PeriodStart = start,
@@ -126,11 +153,29 @@ namespace ControleDeGasto.API.Application.Services
                     .ToList(),
                 MonthlyEvolution = BuildEvolution(monthlyTotals, evolutionStart),
                 Goals = goals
-                    .Select(goal => new SavingsGoalResponse(goal, balanceByGoal.GetValueOrDefault(goal.Id)))
+                    .Select(goal => new SavingsGoalResponse(goal, balanceByGoal.GetValueOrDefault(goal.Id), userId))
                     .ToList(),
                 RecentTransactions = recent
-                    .Select(transaction => new TransactionResponse(transaction))
-                    .ToList()
+                    .Select(transaction => new TransactionResponse(transaction, today))
+                    .ToList(),
+
+                Forecast = await this.GetForecastAsync(userId, start),
+
+                UpcomingBills = upcoming
+                    .Select(transaction => new TransactionResponse(transaction, today))
+                    .ToList(),
+                OverdueBills = overdue
+                    .Select(transaction => new TransactionResponse(transaction, today))
+                    .ToList(),
+
+                // As carteiras de benefício vão em uma lista à parte: o saldo do vale não é
+                // dinheiro livre, e somá-lo ao das contas inflaria o patrimônio exibido.
+                Wallets = wallets.Where(wallet => !wallet.IsBenefit).ToList(),
+                BenefitWallets = wallets.Where(wallet => wallet.IsBenefit).ToList(),
+
+                Shared = await this.BuildSharedSummaryAsync(userId),
+                TagTotals = tagTotals,
+                OpenInstallmentPlans = await this.BuildOpenInstallmentPlansAsync(userId)
             };
         }
 
@@ -171,7 +216,7 @@ namespace ControleDeGasto.API.Application.Services
                 };
             }
 
-            decimal balance = await this.savingsGoalRepository.GetBalanceAsync(userId, reserve.Id);
+            decimal balance = await this.savingsGoalRepository.GetBalanceAsync(reserve.Id);
 
             return new EmergencyReserveResponse()
             {
@@ -186,6 +231,284 @@ namespace ControleDeGasto.API.Application.Services
                     ? 0
                     : Math.Round(Math.Min(100, balance / reserve.TargetAmount * 100), 2)
             };
+        }
+
+        #endregion
+
+        #region Methods :: GetForecastAsync()
+
+        /// <inheritdoc />
+        public async Task<MonthlyForecastResponse> GetForecastAsync(Guid userId, DateTime? reference)
+        {
+            DateTime target = reference.HasValue ? DateTimeHelper.ToUtc(reference.Value) : DateTime.UtcNow;
+
+            DateTime monthStart = DateTimeHelper.StartOfMonth(target);
+            DateTime monthEnd = DateTimeHelper.EndOfMonth(target);
+            DateTime today = DateTimeHelper.ToUtcDate(DateTime.UtcNow);
+
+            IReadOnlyList<TypeTotal> settled = await this.transactionRepository.GetTotalsByTypeAsync(userId, monthStart, monthEnd);
+
+            decimal settledIncome = SumOf(settled, TransactionType.Income);
+            decimal settledExpense = SumOf(settled, TransactionType.Expense);
+
+            IReadOnlyList<PendingTypeTotal> pending = await this.transactionRepository
+                .GetPendingTotalsAsync(userId, monthStart, monthEnd, today);
+
+            PendingTypeTotal? pendingIncome = pending.FirstOrDefault(item => item.Type == TransactionType.Income);
+            PendingTypeTotal? pendingExpense = pending.FirstOrDefault(item => item.Type == TransactionType.Expense);
+
+            IReadOnlyList<FixedEntry> fixedEntries = await this.fixedEntryRepository
+                .GetActiveForMonthAsync(userId, monthStart, monthEnd);
+
+            // O que já foi lançado por categoria abate a previsão fixa da mesma categoria. Sem
+            // isso, quem registra o próprio aluguel veria a despesa contada duas vezes: uma pelo
+            // lançamento e outra pela definição fixa.
+            Dictionary<Guid, decimal> availableByCategory = await this.BuildRealizedByCategoryAsync(userId, monthStart, monthEnd);
+
+            List<ForecastItemResponse> items = [];
+
+            decimal fixedIncome = 0;
+            decimal fixedExpense = 0;
+            decimal remainingFixedIncome = 0;
+            decimal remainingFixedExpense = 0;
+            decimal benefitCredits = 0;
+
+            foreach (FixedEntry entry in fixedEntries)
+            {
+                if (!FixedEntryHelper.AppliesToMonth(entry, monthStart, monthEnd))
+                    continue;
+
+                DateTime expectedOn = FixedEntryHelper.ResolveDateInMonth(entry.DayOfMonth, monthStart);
+
+                if (entry.Kind == FixedEntryKind.BenefitCredit)
+                {
+                    benefitCredits += entry.Amount;
+
+                    items.Add(BuildFixedItem(entry, expectedOn, entry.Amount, 0, TransactionType.Income, today, isBenefit: true));
+
+                    continue;
+                }
+
+                bool isIncome = entry.Kind == FixedEntryKind.Income;
+
+                if (isIncome)
+                    fixedIncome += entry.Amount;
+                else
+                    fixedExpense += entry.Amount;
+
+                decimal matched = 0;
+
+                if (entry.CategoryId.HasValue && availableByCategory.TryGetValue(entry.CategoryId.Value, out decimal available))
+                {
+                    matched = Math.Min(entry.Amount, available);
+                    availableByCategory[entry.CategoryId.Value] = available - matched;
+                }
+
+                decimal remaining = entry.Amount - matched;
+
+                if (isIncome)
+                    remainingFixedIncome += remaining;
+                else
+                    remainingFixedExpense += remaining;
+
+                // O item entra na lista mesmo quando totalmente abatido: some da soma, mas
+                // continua visível como "já lançado", que é a informação que evita o usuário
+                // achar que esqueceu de registrar a conta.
+                items.Add(BuildFixedItem(
+                    entry,
+                    expectedOn,
+                    remaining,
+                    matched,
+                    isIncome ? TransactionType.Income : TransactionType.Expense,
+                    today,
+                    isBenefit: false));
+            }
+
+            IReadOnlyList<Transaction> pendingItems = await this.transactionRepository
+                .GetUpcomingAsync(userId, monthStart, monthEnd, TransactionFilterRequest.MAX_PAGE_SIZE);
+
+            items.AddRange(pendingItems.Select(transaction => new ForecastItemResponse()
+            {
+                Source = transaction.InstallmentPlanId.HasValue
+                    ? ForecastSource.Installment
+                    : ForecastSource.PendingTransaction,
+                ReferenceId = transaction.Id,
+                Description = transaction.Description,
+                Amount = transaction.Amount,
+                Type = transaction.Category?.Type ?? TransactionType.Expense,
+                ExpectedOn = transaction.DueDate ?? transaction.OccurredOn,
+                IsOverdue = (transaction.DueDate ?? transaction.OccurredOn) < today,
+                CategoryId = transaction.CategoryId,
+                CategoryName = transaction.Category?.Name,
+                CategoryColor = transaction.Category?.Color,
+                CategoryIcon = transaction.Category?.Icon,
+                WalletId = transaction.WalletId,
+                WalletName = transaction.Wallet?.Name,
+                WalletColor = transaction.Wallet?.Color
+            }));
+
+            decimal projectedIncome = settledIncome + (pendingIncome?.Total ?? 0) + remainingFixedIncome;
+            decimal projectedExpense = settledExpense + (pendingExpense?.Total ?? 0) + remainingFixedExpense;
+
+            return new MonthlyForecastResponse()
+            {
+                Year = monthStart.Year,
+                Month = monthStart.Month,
+                PeriodStart = monthStart,
+                PeriodEnd = monthEnd,
+
+                SettledIncome = settledIncome,
+                SettledExpense = settledExpense,
+                SettledBalance = settledIncome - settledExpense,
+
+                PendingIncome = pendingIncome?.Total ?? 0,
+                PendingExpense = pendingExpense?.Total ?? 0,
+                OverdueIncome = pendingIncome?.OverdueTotal ?? 0,
+                OverdueExpense = pendingExpense?.OverdueTotal ?? 0,
+
+                FixedIncome = fixedIncome,
+                FixedExpense = fixedExpense,
+                RemainingFixedIncome = remainingFixedIncome,
+                RemainingFixedExpense = remainingFixedExpense,
+                BenefitCredits = benefitCredits,
+
+                ProjectedIncome = projectedIncome,
+                ProjectedExpense = projectedExpense,
+                ProjectedBalance = projectedIncome - projectedExpense,
+                CommittedPercentage = projectedIncome <= 0
+                    ? 0
+                    : Math.Round(projectedExpense / projectedIncome * 100, 2),
+
+                Items = items
+                    .OrderBy(item => item.ExpectedOn)
+                    .ThenBy(item => item.Description)
+                    .ToList()
+            };
+        }
+
+        #endregion
+
+        #region Helpers :: BuildRealizedByCategoryAsync(), BuildFixedItem()
+
+        /// <summary>
+        /// Soma, por categoria, tudo o que o mês já tem de lançamento — liquidado ou previsto.
+        /// </summary>
+        /// <remarks>
+        /// Inclui os previstos de propósito: uma conta fixa já cadastrada como conta a pagar
+        /// aparece nos dois lugares, e contar as duas somaria a mesma despesa em dobro.
+        /// </remarks>
+        /// <param name="userId">Dono dos lançamentos.</param>
+        /// <param name="monthStart">Primeiro instante do mês, em UTC.</param>
+        /// <param name="monthEnd">Último instante do mês, em UTC.</param>
+        /// <returns>Total lançado por categoria.</returns>
+        private async Task<Dictionary<Guid, decimal>> BuildRealizedByCategoryAsync(Guid userId, DateTime monthStart, DateTime monthEnd)
+        {
+            IReadOnlyList<CategoryTotal> incomeTotals = await this.transactionRepository
+                .GetTotalsByCategoryAsync(userId, TransactionType.Income, monthStart, monthEnd, limit: null);
+
+            IReadOnlyList<CategoryTotal> expenseTotals = await this.transactionRepository
+                .GetTotalsByCategoryAsync(userId, TransactionType.Expense, monthStart, monthEnd, limit: null);
+
+            Dictionary<Guid, decimal> realized = [];
+
+            foreach (CategoryTotal total in incomeTotals.Concat(expenseTotals))
+                realized[total.CategoryId] = realized.GetValueOrDefault(total.CategoryId) + total.Total;
+
+            IReadOnlyList<Transaction> pendingItems = await this.transactionRepository
+                .GetUpcomingAsync(userId, monthStart, monthEnd, TransactionFilterRequest.MAX_PAGE_SIZE);
+
+            foreach (Transaction transaction in pendingItems)
+                realized[transaction.CategoryId] = realized.GetValueOrDefault(transaction.CategoryId) + transaction.Amount;
+
+            return realized;
+        }
+
+        /// <summary>
+        /// Converte uma definição fixa em item de previsão.
+        /// </summary>
+        /// <param name="entry">Definição de origem.</param>
+        /// <param name="expectedOn">Data prevista no mês.</param>
+        /// <param name="amount">Valor que ainda entra na soma.</param>
+        /// <param name="alreadyRealized">Valor já coberto por lançamentos do mês.</param>
+        /// <param name="type">Natureza a exibir.</param>
+        /// <param name="today">Data de hoje, em UTC.</param>
+        /// <param name="isBenefit">Indica crédito de benefício.</param>
+        /// <returns>Item pronto para a resposta.</returns>
+        private static ForecastItemResponse BuildFixedItem(
+            FixedEntry entry,
+            DateTime expectedOn,
+            decimal amount,
+            decimal alreadyRealized,
+            TransactionType type,
+            DateTime today,
+            bool isBenefit)
+        {
+            return new ForecastItemResponse()
+            {
+                Source = ForecastSource.FixedEntry,
+                ReferenceId = entry.Id,
+                Description = entry.Description,
+                Amount = amount,
+                Type = type,
+                IsBenefitCredit = isBenefit,
+                ExpectedOn = expectedOn,
+
+                // Um fixo já coberto por lançamento não está atrasado: o dinheiro passou, só
+                // não por esta linha.
+                IsOverdue = amount > 0 && expectedOn < today,
+                AlreadyRealizedAmount = alreadyRealized,
+                CategoryId = entry.CategoryId,
+                CategoryName = entry.Category?.Name,
+                CategoryColor = entry.Category?.Color,
+                CategoryIcon = entry.Category?.Icon,
+                WalletId = entry.WalletId,
+                WalletName = entry.Wallet?.Name,
+                WalletColor = entry.Wallet?.Color
+            };
+        }
+
+        #endregion
+
+        #region Helpers :: BuildSharedSummaryAsync(), BuildOpenInstallmentPlansAsync()
+
+        /// <summary>
+        /// Apura o resumo das divisões de compra em aberto.
+        /// </summary>
+        /// <param name="userId">Usuário de referência.</param>
+        /// <returns>Totais a receber e a pagar.</returns>
+        private async Task<SharedSummaryResponse> BuildSharedSummaryAsync(Guid userId)
+        {
+            IReadOnlyList<FriendBalance> balances = await this.transactionRepository.GetFriendBalancesAsync(userId);
+
+            PagedResult<TransactionShare> openShares = await this.transactionRepository
+                .GetSharedWithUserAsync(userId, onlyOpen: true, page: 1, pageSize: 1);
+
+            decimal receivable = balances.Sum(item => item.Receivable);
+            decimal payable = balances.Sum(item => item.Payable);
+
+            return new SharedSummaryResponse()
+            {
+                Receivable = receivable,
+                Payable = payable,
+                NetBalance = receivable - payable,
+                FriendCount = balances.Count(item => item.Receivable > 0 || item.Payable > 0),
+                OpenShareCount = openShares.TotalCount
+            };
+        }
+
+        /// <summary>
+        /// Lista as compras parceladas com parcela em aberto.
+        /// </summary>
+        /// <param name="userId">Dono das compras.</param>
+        /// <returns>Compras em andamento.</returns>
+        private async Task<IReadOnlyList<InstallmentPlanResponse>> BuildOpenInstallmentPlansAsync(Guid userId)
+        {
+            IReadOnlyList<InstallmentPlan> plans = await this.transactionRepository
+                .GetInstallmentPlansAsync(userId, onlyOpen: true);
+
+            return plans
+                .Select(plan => new InstallmentPlanResponse(plan))
+                .ToList();
         }
 
         #endregion

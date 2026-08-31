@@ -23,6 +23,32 @@ namespace ControleDeGasto.API.Infra.Persistence
 
         #endregion
 
+        #region Properties :: Friendships, SavingsGoalMembers, TransactionShares
+
+        public DbSet<Friendship> Friendships => this.Set<Friendship>();
+
+        public DbSet<SavingsGoalMember> SavingsGoalMembers => this.Set<SavingsGoalMember>();
+
+        public DbSet<TransactionShare> TransactionShares => this.Set<TransactionShare>();
+
+        #endregion
+
+        #region Properties :: Wallets, WalletTransfers, FixedEntries, Tags, TransactionTags, InstallmentPlans
+
+        public DbSet<Wallet> Wallets => this.Set<Wallet>();
+
+        public DbSet<WalletTransfer> WalletTransfers => this.Set<WalletTransfer>();
+
+        public DbSet<FixedEntry> FixedEntries => this.Set<FixedEntry>();
+
+        public DbSet<Tag> Tags => this.Set<Tag>();
+
+        public DbSet<TransactionTag> TransactionTags => this.Set<TransactionTag>();
+
+        public DbSet<InstallmentPlan> InstallmentPlans => this.Set<InstallmentPlan>();
+
+        #endregion
+
         #region Methods :: OnModelCreating()
 
         /// <summary>

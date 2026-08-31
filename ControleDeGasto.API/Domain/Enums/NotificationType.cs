@@ -21,6 +21,30 @@ namespace ControleDeGasto.API.Domain.Enums
         NegativeMonthlyBalance = 5,
 
         /// <summary>Resumo mensal das finanças.</summary>
-        MonthlySummary = 6
+        MonthlySummary = 6,
+
+        /// <summary>Alguém enviou um convite de amizade.</summary>
+        FriendRequestReceived = 7,
+
+        /// <summary>Um convite de amizade enviado foi aceito.</summary>
+        FriendRequestAccepted = 8,
+
+        /// <summary>Um amigo dividiu uma compra e atribuiu uma parte ao usuário.</summary>
+        ExpenseShared = 9,
+
+        /// <summary>Uma divisão de compra foi marcada como acertada.</summary>
+        ExpenseShareSettled = 10,
+
+        /// <summary>Uma conta prevista está com vencimento próximo.</summary>
+        BillDueSoon = 11,
+
+        /// <summary>Uma conta prevista passou do vencimento sem ser liquidada.</summary>
+        BillOverdue = 12,
+
+        /// <summary>O usuário foi adicionado a um cofrinho compartilhado.</summary>
+        SharedGoalJoined = 13,
+
+        /// <summary>Saldo de uma carteira de benefício perto do fim antes do próximo crédito.</summary>
+        BenefitBalanceLow = 14
     }
 }

@@ -116,7 +116,10 @@ namespace ControleDeGasto.API.Infra.Repositories
         {
             ArgumentNullException.ThrowIfNull(savingsGoal);
 
-            this.context.SavingsGoals.Update(savingsGoal);
+            // Marca só o cofrinho, e não o grafo. `Update` marcaria como alterados os
+            // participantes e os usuários que vieram nos Include, reescrevendo linhas de outras
+            // tabelas sem ninguém ter pedido.
+            this.context.Entry(savingsGoal).State = EntityState.Modified;
 
             return await this.context.SaveChangesAsync() > 0;
         }
@@ -218,16 +221,20 @@ namespace ControleDeGasto.API.Infra.Repositories
         /// <inheritdoc />
         public async Task<IReadOnlyDictionary<Guid, decimal>> GetMemberBalancesAsync(Guid savingsGoalId)
         {
-            List<KeyValuePair<Guid, decimal>> balances = await this.context.SavingsGoalContributions
+            // A projeção usa tipo anônimo, e não KeyValuePair: o EF Core traduz inicialização de
+            // membros, mas não garante a tradução de um construtor posicional em um GROUP BY.
+            var balances = await this.context.SavingsGoalContributions
                 .AsNoTracking()
                 .Where(x => x.SavingsGoalId == savingsGoalId)
                 .GroupBy(x => x.UserId)
-                .Select(group => new KeyValuePair<Guid, decimal>(
-                    group.Key,
-                    group.Sum(x => x.Kind == ContributionKind.Deposit ? x.Amount : -x.Amount)))
+                .Select(group => new
+                {
+                    UserId = group.Key,
+                    Balance = group.Sum(x => x.Kind == ContributionKind.Deposit ? x.Amount : -x.Amount)
+                })
                 .ToListAsync();
 
-            return balances.ToDictionary(item => item.Key, item => item.Value);
+            return balances.ToDictionary(item => item.UserId, item => item.Balance);
         }
 
         #endregion

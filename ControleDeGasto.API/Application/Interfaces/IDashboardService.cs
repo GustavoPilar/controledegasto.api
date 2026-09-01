@@ -26,8 +26,9 @@ namespace ControleDeGasto.API.Application.Interfaces
         /// <param name="type">Natureza a considerar.</param>
         /// <param name="from">Início do período. Nulo assume o primeiro dia do mês atual.</param>
         /// <param name="to">Fim do período. Nulo assume o último dia do mês atual.</param>
+        /// <param name="walletId">Restringe a uma carteira. Nulo considera todas.</param>
         /// <returns>Categorias ordenadas da que mais movimentou para a que menos movimentou.</returns>
-        Task<IReadOnlyList<CategorySpendingResponse>> GetCategoryBreakdownAsync(Guid userId, TransactionType type, DateTime? from, DateTime? to);
+        Task<IReadOnlyList<CategorySpendingResponse>> GetCategoryBreakdownAsync(Guid userId, TransactionType type, DateTime? from, DateTime? to, Guid? walletId = null);
 
         /// <summary>
         /// Apura a situação da reserva de emergência, incluindo o valor recomendado.

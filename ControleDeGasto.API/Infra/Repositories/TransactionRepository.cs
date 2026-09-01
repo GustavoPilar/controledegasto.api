@@ -208,7 +208,10 @@ namespace ControleDeGasto.API.Infra.Repositories
         {
             ArgumentNullException.ThrowIfNull(transaction);
 
-            this.context.Transactions.Update(transaction);
+            // Marca só o lançamento, e não o grafo. `Update` marcaria como alterado tudo o que
+            // veio nos Include — a categoria, a carteira e até o usuário dono de cada divisão —
+            // e reescreveria linhas de outras tabelas sem ninguém ter pedido.
+            this.context.Entry(transaction).State = EntityState.Modified;
 
             return await this.context.SaveChangesAsync() > 0;
         }
@@ -246,15 +249,22 @@ namespace ControleDeGasto.API.Infra.Repositories
         }
 
         /// <inheritdoc />
-        public async Task<IReadOnlyList<CategoryTotal>> GetTotalsByCategoryAsync(Guid userId, TransactionType type, DateTime from, DateTime to, int? limit)
+        public async Task<IReadOnlyList<CategoryTotal>> GetTotalsByCategoryAsync(Guid userId, TransactionType type, DateTime from, DateTime to, int? limit, Guid? walletId = null)
         {
-            IQueryable<CategoryTotal> query = this.context.Transactions
+            IQueryable<Transaction> source = this.context.Transactions
                 .AsNoTracking()
                 .Where(x => x.UserId == userId
                     && x.Status == TransactionStatus.Settled
                     && x.OccurredOn >= from
                     && x.OccurredOn <= to
-                    && x.Category!.Type == type)
+                    && x.Category!.Type == type);
+
+            // O recorte por carteira é o que responde "no que o meu VR está sendo gasto": as
+            // categorias já existem, e o vale é apenas a carteira que pagou.
+            if (walletId.HasValue)
+                source = source.Where(x => x.WalletId == walletId.Value);
+
+            IQueryable<CategoryTotal> query = source
                 .GroupBy(x => new
                 {
                     x.CategoryId,
@@ -462,7 +472,9 @@ namespace ControleDeGasto.API.Infra.Repositories
         {
             ArgumentNullException.ThrowIfNull(share);
 
-            this.context.TransactionShares.Update(share);
+            // Só a divisão: o lançamento e o usuário vieram nos Include e não devem ser
+            // reescritos por causa de um acerto de conta.
+            this.context.Entry(share).State = EntityState.Modified;
 
             return await this.context.SaveChangesAsync() > 0;
         }

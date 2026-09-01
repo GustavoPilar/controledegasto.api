@@ -34,10 +34,28 @@ namespace ControleDeGasto.API.Application.Services
         /// <summary>Fração do valor recomendado abaixo da qual a reserva é considerada baixa.</summary>
         private const decimal RESERVE_LOW_FACTOR = 0.5m;
 
+        /// <summary>Dias de antecedência do aviso de vencimento de conta.</summary>
+        private const int BILL_WARNING_DAYS = 3;
+
+        /// <summary>
+        /// Teto de contas avisadas por ciclo. Quem tem trinta contas vencidas não precisa de
+        /// trinta avisos: precisa abrir a tela de contas vencidas.
+        /// </summary>
+        private const int BILL_NOTIFICATION_LIMIT = 10;
+
         private static readonly TimeSpan DEDUPE_DEADLINE = TimeSpan.FromDays(DEADLINE_WARNING_DAYS);
         private static readonly TimeSpan DEDUPE_RESERVE = TimeSpan.FromDays(30);
         private static readonly TimeSpan DEDUPE_SPENDING = TimeSpan.FromDays(15);
         private static readonly TimeSpan DEDUPE_BALANCE = TimeSpan.FromDays(15);
+
+        /// <summary>
+        /// Um aviso de vencimento por conta a cada dois dias: menos que isso repetiria o mesmo
+        /// lembrete a cada ciclo da rotina.
+        /// </summary>
+        private static readonly TimeSpan DEDUPE_BILL_DUE = TimeSpan.FromDays(2);
+
+        /// <summary>Conta vencida volta a avisar a cada cinco dias enquanto não for paga.</summary>
+        private static readonly TimeSpan DEDUPE_BILL_OVERDUE = TimeSpan.FromDays(5);
 
         #endregion
 
@@ -138,6 +156,7 @@ namespace ControleDeGasto.API.Application.Services
             created += await this.EvaluateEmergencyReserveAsync(userId);
             created += await this.EvaluateCategorySpendingAsync(userId);
             created += await this.EvaluateMonthlyBalanceAsync(userId);
+            created += await this.EvaluateBillsAsync(userId);
 
             return created;
         }
@@ -338,6 +357,79 @@ namespace ControleDeGasto.API.Application.Services
                 DEDUPE_BALANCE);
 
             return notified ? 1 : 0;
+        }
+
+        #endregion
+
+        #region Helpers :: EvaluateBillsAsync()
+
+        /// <summary>
+        /// Avisa sobre contas a vencer e contas já vencidas.
+        /// </summary>
+        /// <remarks>
+        /// Um aviso por conta, e não um resumo, porque cada conta tem uma ação própria: pagar
+        /// aquela conta. A janela de repetição é por conta — a referência é o lançamento — para
+        /// que lembrar de uma não silencie o aviso das outras.
+        /// </remarks>
+        /// <param name="userId">Usuário a avaliar.</param>
+        /// <returns>Quantidade de notificações criadas.</returns>
+        private async Task<int> EvaluateBillsAsync(Guid userId)
+        {
+            DateTime today = DateTimeHelper.ToUtcDate(DateTime.UtcNow);
+
+            int created = 0;
+
+            IReadOnlyList<Transaction> upcoming = await this.transactionRepository
+                .GetUpcomingAsync(userId, today, today.AddDays(BILL_WARNING_DAYS), BILL_NOTIFICATION_LIMIT);
+
+            foreach (Transaction bill in upcoming)
+            {
+                int daysLeft = (int)Math.Ceiling((bill.DueDate!.Value.Date - today.Date).TotalDays);
+
+                bool isIncome = bill.Category?.Type == TransactionType.Income;
+
+                string whenText = daysLeft <= 0
+                    ? "hoje"
+                    : daysLeft == 1 ? "amanhã" : $"em {daysLeft} dias";
+
+                bool notified = await this.CreateAsync(
+                    userId,
+                    NotificationType.BillDueSoon,
+                    isIncome ? $"\"{bill.Description}\" está para entrar" : $"\"{bill.Description}\" vence {whenText}",
+                    isIncome
+                        ? $"Você deve receber {FormatMoney(bill.Amount)} {whenText}."
+                        : $"São {FormatMoney(bill.Amount)} com vencimento {whenText}.",
+                    bill.Id,
+                    DEDUPE_BILL_DUE);
+
+                if (notified)
+                    created++;
+            }
+
+            IReadOnlyList<Transaction> overdue = await this.transactionRepository
+                .GetOverdueAsync(userId, today, BILL_NOTIFICATION_LIMIT);
+
+            foreach (Transaction bill in overdue)
+            {
+                int daysLate = (int)Math.Ceiling((today.Date - bill.DueDate!.Value.Date).TotalDays);
+
+                bool isIncome = bill.Category?.Type == TransactionType.Income;
+
+                bool notified = await this.CreateAsync(
+                    userId,
+                    NotificationType.BillOverdue,
+                    isIncome ? $"\"{bill.Description}\" não entrou" : $"\"{bill.Description}\" está vencida",
+                    isIncome
+                        ? $"{FormatMoney(bill.Amount)} eram esperados há {daysLate} dia(s) e ainda não foram marcados como recebidos."
+                        : $"{FormatMoney(bill.Amount)} venceram há {daysLate} dia(s) e ainda não foram marcados como pagos.",
+                    bill.Id,
+                    DEDUPE_BILL_OVERDUE);
+
+                if (notified)
+                    created++;
+            }
+
+            return created;
         }
 
         #endregion

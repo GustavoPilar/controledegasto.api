@@ -66,7 +66,7 @@ namespace ControleDeGasto.API.Infra.Persistence.Configuration
 
             builder.ToTable(table => table.HasCheckConstraint(
                 "CK_InstallmentPlans_InstallmentCount",
-                "\"InstallmentCount\" BETWEEN 2 AND 360"));
+                "\"InstallmentCount\" BETWEEN 1 AND 360"));
         }
 
         #endregion

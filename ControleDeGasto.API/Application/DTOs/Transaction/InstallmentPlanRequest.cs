@@ -18,7 +18,7 @@ namespace ControleDeGasto.API.Application.DTOs
         private const double AMOUNT_MINIMUM = 0.02;
         private const double AMOUNT_MAXIMUM = 999_999_999.99;
 
-        public const int MIN_INSTALLMENTS = 2;
+        public const int MIN_INSTALLMENTS = 1;
         public const int MAX_INSTALLMENTS = 360;
         public const int MAX_TAGS = 10;
 

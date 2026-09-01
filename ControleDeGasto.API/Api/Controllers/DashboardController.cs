@@ -41,12 +41,14 @@ namespace ControleDeGasto.API.Api.Controllers
         /// <param name="type">Natureza a considerar.</param>
         /// <param name="from">Início do período. Nulo assume o mês atual.</param>
         /// <param name="to">Fim do período. Nulo assume o mês atual.</param>
+        /// <param name="walletId">Restringe a uma carteira. Nulo considera todas.</param>
         /// <returns>Categorias ordenadas pela que mais movimentou.</returns>
         [HttpGet("category-breakdown")]
         public async Task<ActionResult<IReadOnlyList<CategorySpendingResponse>>> GetCategoryBreakdown(
             [FromQuery] TransactionType type = TransactionType.Expense,
             [FromQuery] DateTime? from = null,
-            [FromQuery] DateTime? to = null)
+            [FromQuery] DateTime? to = null,
+            [FromQuery] Guid? walletId = null)
         {
             if (!this.TryGetUserId(out Guid userId))
                 return this.Unauthorized(new { Message = "Credenciais inválidas." });
@@ -54,7 +56,7 @@ namespace ControleDeGasto.API.Api.Controllers
             if (!Enum.IsDefined(type))
                 return this.BadRequest(new { Message = "Tipo inválido." });
 
-            return this.Ok(await this.service.GetCategoryBreakdownAsync(userId, type, from, to));
+            return this.Ok(await this.service.GetCategoryBreakdownAsync(userId, type, from, to, walletId));
         }
 
         /// <summary>

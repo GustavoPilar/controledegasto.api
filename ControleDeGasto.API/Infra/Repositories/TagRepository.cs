@@ -102,14 +102,21 @@ namespace ControleDeGasto.API.Infra.Repositories
         {
             // Uma consulta agrupada para todas as etiquetas do usuário, em vez de uma contagem
             // por etiqueta na montagem da lista.
-            List<KeyValuePair<Guid, int>> counts = await this.context.TransactionTags
+            //
+            // A projeção usa tipo anônimo, e não KeyValuePair: o EF Core traduz inicialização de
+            // membros, mas não garante a tradução de um construtor posicional em um GROUP BY.
+            var counts = await this.context.TransactionTags
                 .AsNoTracking()
                 .Where(x => x.Tag!.UserId == userId)
                 .GroupBy(x => x.TagId)
-                .Select(group => new KeyValuePair<Guid, int>(group.Key, group.Count()))
+                .Select(group => new
+                {
+                    TagId = group.Key,
+                    Total = group.Count()
+                })
                 .ToListAsync();
 
-            return counts.ToDictionary(item => item.Key, item => item.Value);
+            return counts.ToDictionary(item => item.TagId, item => item.Total);
         }
 
         #endregion

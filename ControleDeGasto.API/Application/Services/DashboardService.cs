@@ -184,12 +184,12 @@ namespace ControleDeGasto.API.Application.Services
         #region Methods :: GetCategoryBreakdownAsync(), GetEmergencyReserveAsync()
 
         /// <inheritdoc />
-        public async Task<IReadOnlyList<CategorySpendingResponse>> GetCategoryBreakdownAsync(Guid userId, TransactionType type, DateTime? from, DateTime? to)
+        public async Task<IReadOnlyList<CategorySpendingResponse>> GetCategoryBreakdownAsync(Guid userId, TransactionType type, DateTime? from, DateTime? to, Guid? walletId = null)
         {
             (DateTime start, DateTime end) = ResolvePeriod(from, to);
 
             IReadOnlyList<CategoryTotal> totals = await this.transactionRepository
-                .GetTotalsByCategoryAsync(userId, type, start, end, limit: null);
+                .GetTotalsByCategoryAsync(userId, type, start, end, limit: null, walletId);
 
             decimal periodTotal = totals.Sum(x => x.Total);
 

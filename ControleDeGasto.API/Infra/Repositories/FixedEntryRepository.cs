@@ -95,7 +95,9 @@ namespace ControleDeGasto.API.Infra.Repositories
         {
             ArgumentNullException.ThrowIfNull(fixedEntry);
 
-            this.context.FixedEntries.Update(fixedEntry);
+            // Só a definição: a categoria e a carteira vieram nos Include e não devem ser
+            // reescritas junto.
+            this.context.Entry(fixedEntry).State = EntityState.Modified;
 
             return await this.context.SaveChangesAsync() > 0;
         }

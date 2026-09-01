@@ -77,8 +77,9 @@ namespace ControleDeGasto.API.Domain.Interfaces
         /// <param name="from">Início do período, em UTC.</param>
         /// <param name="to">Fim do período, em UTC.</param>
         /// <param name="limit">Quantidade máxima de categorias, das que mais movimentaram. Nulo traz todas.</param>
+        /// <param name="walletId">Restringe a uma carteira. Nulo considera todas.</param>
         /// <returns>Totais por categoria, do maior para o menor.</returns>
-        Task<IReadOnlyList<CategoryTotal>> GetTotalsByCategoryAsync(Guid userId, TransactionType type, DateTime from, DateTime to, int? limit);
+        Task<IReadOnlyList<CategoryTotal>> GetTotalsByCategoryAsync(Guid userId, TransactionType type, DateTime from, DateTime to, int? limit, Guid? walletId = null);
 
         /// <summary>
         /// Soma os lançamentos liquidados agrupados por ano, mês e natureza.
